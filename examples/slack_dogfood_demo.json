@@ -1,0 +1,35 @@
+[
+  {
+    "type": "dm",
+    "at": "2026-05-05T09:00:00",
+    "sender_id": "me",
+    "message_id": "demo/slack/babyfair/1",
+    "text": "워크숍 이번주 목~일 중 하루 가야함"
+  },
+  {
+    "type": "dm",
+    "at": "2026-05-05T09:05:00",
+    "sender_id": "me",
+    "message_id": "demo/slack/babyfair/2",
+    "text": "토요일 오전에 나랑 팀원 같이 갈게"
+  },
+  {
+    "type": "dm",
+    "at": "2026-05-05T09:10:00",
+    "sender_id": "me",
+    "message_id": "demo/slack/routine/1",
+    "text": "sample-data sync 미팅 주 1회 화요일 10시 3층 회의실, 나랑 팀원 참석, 자료 준비 필요"
+  },
+  {
+    "type": "approve_latest",
+    "at": "2026-05-05T09:12:00",
+    "approver_id": "teammate"
+  },
+  {
+    "type": "dm",
+    "at": "2026-05-05T09:20:00",
+    "sender_id": "me",
+    "message_id": "demo/slack/reference/1",
+    "text": "https://example.com/team-checklist"
+  }
+]

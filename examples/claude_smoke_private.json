@@ -1,0 +1,9 @@
+[
+  {
+    "type": "private",
+    "at": "2026-06-02T09:00:00",
+    "sender_id": "me",
+    "message_id": "smoke/claude/1",
+    "text": "내일 오전 10시까지 데모 준비 체크리스트 정리해줘"
+  }
+]

@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import re
+
+from .domain import ChatCommand
+
+
+COMMAND_RE = re.compile(
+    r"^\s*(?P<verb>수락|승인|accept|ok|거절|reject|변경|change|완료|done|담당|assign)"
+    r"\s+(?P<target>\S+)(?:\s+(?P<body>.+))?\s*$",
+    re.IGNORECASE,
+)
+INSTANCE_PROBE_RE = re.compile(
+    r"^\s*(?:mac-mini-only|macmini-only|맥미니전용응답)\s+"
+    r"(?P<target_instance_id>\S+)\s+(?P<nonce>\S+)(?:\s+(?P<body>.+))?\s*$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class InstanceProbeCommand:
+    target_instance_id: str
+    nonce: str
+    body: str = ""
+
+
+def parse_chat_command(text: str) -> ChatCommand | None:
+    match = COMMAND_RE.match(text)
+    if not match:
+        return None
+    verb = match.group("verb").lower()
+    action = {
+        "수락": "accept",
+        "승인": "accept",
+        "accept": "accept",
+        "ok": "accept",
+        "거절": "reject",
+        "reject": "reject",
+        "변경": "change",
+        "change": "change",
+        "완료": "complete",
+        "done": "complete",
+        "담당": "assign",
+        "assign": "assign",
+    }[verb]
+    return ChatCommand(
+        action=action,
+        target_id=match.group("target"),
+        body=(match.group("body") or "").strip(),
+    )
+
+
+def parse_instance_probe(text: str) -> InstanceProbeCommand | None:
+    match = INSTANCE_PROBE_RE.match(text)
+    if not match:
+        return None
+    return InstanceProbeCommand(
+        target_instance_id=match.group("target_instance_id"),
+        nonce=match.group("nonce"),
+        body=(match.group("body") or "").strip(),
+    )

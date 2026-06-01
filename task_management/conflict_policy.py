@@ -1,0 +1,398 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import date, datetime
+
+from .approval_policy import approval_request
+from .domain import ApprovalDecision, ApprovalRequest, IncomingMessage, OutboundMessage, Proposal
+from .human_view import date_label, date_range_label
+from .store import TeamTaskStore
+
+
+CONFLICT_SLOT = "conflict_resolution"
+
+ConflictAction = str
+
+
+def apply_conflict_policy(
+    store: TeamTaskStore,
+    proposal: Proposal,
+    *,
+    actor_id: str,
+    now: datetime,
+) -> tuple[Proposal, tuple[ApprovalRequest, ...], tuple[OutboundMessage, ...]]:
+    """Hold new blocking events when they overlap existing approved events.
+
+    The operating agent may identify a large schedule block such as a 출장/training
+    period.  The deterministic core owns the safety rule: if that new block
+    overlaps an already-approved in-person event for the same actor, do not
+    silently approve or cancel either item. Ask the actor for a conflict decision.
+    """
+
+    conflicts = _blocking_conflicts(store, proposal)
+    if not conflicts:
+        return proposal, (), ()
+
+    conflict_ids = ",".join(item.proposal_id for item in conflicts)
+    missing_slots = tuple(dict.fromkeys((*proposal.missing_slots, CONFLICT_SLOT)))
+    held = replace(
+        proposal,
+        kind="question",
+        status="awaiting_approval",
+        required_approvers=(actor_id,),
+        approvals=(),
+        missing_slots=missing_slots,
+        metadata={
+            **proposal.metadata,
+            "conflict_detected": "true",
+            "conflict_detected_at": now.isoformat(timespec="seconds"),
+            "conflict_with_proposal_ids": conflict_ids,
+            "conflict_policy": "ask_before_mutating_existing_events",
+        },
+        updated_at=now,
+    )
+    request = approval_request(held.proposal_id, actor_id, now=now)
+    return held, (request,), (_conflict_message(held, conflicts, request),)
+
+
+def apply_conflict_resolution_feedback(
+    store: TeamTaskStore,
+    message: IncomingMessage,
+    *,
+    now: datetime,
+) -> Proposal | None:
+    """Apply a natural-language answer to a pending schedule conflict.
+
+    Supported MVP answers are intentionally small and conservative:
+    - existing event cannot be attended / should be canceled
+    - both schedules can stay
+    - decision is deferred
+    """
+
+    action = parse_conflict_action(message.text)
+    if action == "":
+        return None
+    proposal = _pending_conflict_for_actor(store, actor_id=message.sender_id)
+    if proposal is None:
+        return None
+
+    if action == "defer":
+        updated = replace(
+            proposal,
+            metadata={
+                **proposal.metadata,
+                "last_state_linked_update_type": "conflict_resolution_deferred",
+                "conflict_resolution_answer": message.text,
+                "conflict_resolution_answer_message_id": message.message_id,
+                "conflict_resolution_answered_at": now.isoformat(timespec="seconds"),
+            },
+            updated_at=now,
+        )
+        store.save_proposal(updated)
+        store.append_event(
+            "proposal.changed",
+            {"proposal": updated, "change_type": "conflict_resolution_deferred", "actor_id": message.sender_id},
+            occurred_at=now,
+        )
+        return updated
+
+    conflict_ids = _conflict_ids(proposal)
+    conflicts = tuple(item for item in (store.get_proposal(pid) for pid in conflict_ids) if item is not None)
+    if action in {"not_attending_existing", "cancel_existing"}:
+        for conflict in conflicts:
+            _mark_existing_conflict_not_attending(
+                store,
+                conflict,
+                parent=proposal,
+                actor_id=message.sender_id,
+                answer=message.text,
+                now=now,
+            )
+
+    approved = _approve_conflict_parent(
+        store,
+        proposal,
+        action=action,
+        actor_id=message.sender_id,
+        answer=message.text,
+        conflicts=conflicts,
+        now=now,
+    )
+    return approved
+
+
+def parse_conflict_action(text: str) -> ConflictAction:
+    normalized = text.replace(" ", "").lower()
+    if any(token in normalized for token in ("보류", "나중", "아직", "미정")):
+        return "defer"
+    if any(token in normalized for token in ("둘다", "둘다가능", "참석가능", "갈수", "갈수있", "가능")) and not any(
+        token in normalized for token in ("못", "불참", "취소")
+    ):
+        return "keep_both"
+    if "취소" in normalized:
+        return "cancel_existing"
+    if any(token in normalized for token in ("불참", "참석하지못", "못할", "못갈", "못가", "못함")):
+        return "not_attending_existing"
+    return ""
+
+
+def _blocking_conflicts(store: TeamTaskStore, proposal: Proposal) -> tuple[Proposal, ...]:
+    if not _is_blocking_event(proposal):
+        return ()
+    start, end = _proposal_date_range(proposal)
+    if start is None:
+        return ()
+    conflicts: list[Proposal] = []
+    for existing in store.list_proposals():
+        if existing.proposal_id == proposal.proposal_id:
+            continue
+        if existing.status not in {"approved", "applied"}:
+            continue
+        if existing.kind not in {"event", "routine"}:
+            continue
+        if not _same_actor(proposal, existing):
+            continue
+        existing_start, existing_end = _proposal_date_range(existing)
+        if existing_start is None:
+            continue
+        if _ranges_overlap(start, end, existing_start, existing_end):
+            conflicts.append(existing)
+    return tuple(sorted(conflicts, key=lambda item: (_date_label(item), item.time_window, item.title)))
+
+
+def _pending_conflict_for_actor(store: TeamTaskStore, *, actor_id: str) -> Proposal | None:
+    pending_requests = store.list_approval_requests(approver_id=actor_id, status="pending")
+    candidates: list[Proposal] = []
+    for request in pending_requests:
+        proposal = store.get_proposal(request.proposal_id)
+        if proposal is None:
+            continue
+        if proposal.status != "awaiting_approval":
+            continue
+        if proposal.metadata.get("conflict_detected") == "true" and CONFLICT_SLOT in proposal.missing_slots:
+            candidates.append(proposal)
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda item: item.updated_at or item.created_at or datetime.min)[-1]
+
+
+def _conflict_ids(proposal: Proposal) -> tuple[str, ...]:
+    raw = proposal.metadata.get("conflict_with_proposal_ids", "")
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
+def _mark_existing_conflict_not_attending(
+    store: TeamTaskStore,
+    conflict: Proposal,
+    *,
+    parent: Proposal,
+    actor_id: str,
+    answer: str,
+    now: datetime,
+) -> Proposal:
+    updated = replace(
+        conflict,
+        status="rejected",
+        metadata={
+            **conflict.metadata,
+            "attendance_status": "not_attending",
+            "previous_status": conflict.status,
+            "conflict_resolution_action": "not_attending_existing",
+            "conflict_resolution_parent_proposal_id": parent.proposal_id,
+            "conflict_resolution_actor_id": actor_id,
+            "conflict_resolution_answer": answer,
+            "conflict_resolution_at": now.isoformat(timespec="seconds"),
+        },
+        updated_at=now,
+    )
+    store.save_proposal(updated)
+    store.append_event(
+        "proposal.changed",
+        {
+            "proposal": updated,
+            "change_type": "conflict_existing_not_attending",
+            "actor_id": actor_id,
+            "parent_proposal_id": parent.proposal_id,
+        },
+        occurred_at=now,
+    )
+    store.append_event(
+        "proposal.rejected",
+        {
+            "proposal": updated,
+            "reason": "conflict_resolution_not_attending",
+            "parent_proposal_id": parent.proposal_id,
+        },
+        occurred_at=now,
+    )
+    return updated
+
+
+def _approve_conflict_parent(
+    store: TeamTaskStore,
+    proposal: Proposal,
+    *,
+    action: ConflictAction,
+    actor_id: str,
+    answer: str,
+    conflicts: tuple[Proposal, ...],
+    now: datetime,
+) -> Proposal:
+    request = _pending_request_for_proposal(store, proposal.proposal_id, actor_id=actor_id)
+    if request is not None:
+        decided = replace(request, status="accepted", decided_at=now)
+        decision = ApprovalDecision(
+            request_id=request.request_id,
+            proposal_id=request.proposal_id,
+            approver_id=actor_id,
+            decision="accepted",
+            decided_at=now,
+        )
+        store.save_approval_request(decided)
+        store.save_approval_decision(decision)
+        store.append_event(
+            "approval.accepted",
+            {"decision": decision, "reconciled": True, "reason": "conflict_resolution"},
+            occurred_at=now,
+        )
+
+    missing_slots = tuple(item for item in proposal.missing_slots if item != CONFLICT_SLOT)
+    approvals = tuple(sorted(set((*proposal.approvals, actor_id))))
+    required = proposal.required_approvers or (actor_id,)
+    status = "approved" if not missing_slots and set(required).issubset(approvals) else "awaiting_approval"
+    kind = "event" if proposal.scheduled_date is not None else proposal.kind
+    updated = replace(
+        proposal,
+        kind=kind,
+        status=status,
+        approvals=approvals,
+        required_approvers=required,
+        missing_slots=missing_slots,
+        metadata={
+            **proposal.metadata,
+            "last_state_linked_update_type": "conflict_resolution_applied",
+            "conflict_resolution_action": action,
+            "conflict_resolution_answer": answer,
+            "conflict_resolution_actor_id": actor_id,
+            "conflict_resolution_at": now.isoformat(timespec="seconds"),
+            "conflict_resolved_existing_titles": " / ".join(item.title for item in conflicts),
+        },
+        updated_at=now,
+    )
+    store.save_proposal(updated)
+    store.append_event(
+        "proposal.changed",
+        {"proposal": updated, "change_type": "conflict_resolution_applied", "actor_id": actor_id},
+        occurred_at=now,
+    )
+    if updated.status == "approved":
+        store.append_event(
+            "proposal.approved",
+            {"proposal": updated, "reason": "conflict_resolution"},
+            occurred_at=now,
+        )
+    return updated
+
+
+def _pending_request_for_proposal(store: TeamTaskStore, proposal_id: str, *, actor_id: str) -> ApprovalRequest | None:
+    requests = store.list_approval_requests(proposal_id=proposal_id, approver_id=actor_id, status="pending")
+    if requests:
+        return requests[0]
+    requests = store.list_approval_requests(proposal_id=proposal_id, status="pending")
+    return requests[0] if requests else None
+
+
+def _is_blocking_event(proposal: Proposal) -> bool:
+    if proposal.kind not in {"event", "routine"}:
+        return False
+    metadata = proposal.metadata
+    if metadata.get("blocks_in_person") == "true" or metadata.get("event_scope") in {"away", "travel", "출장"}:
+        return True
+    text = f"{proposal.title} {proposal.raw_text}"
+    return "출장" in text or "입과" in text or "교육" in text
+
+
+def _proposal_date_range(proposal: Proposal) -> tuple[date | None, date | None]:
+    start = _date_from_text(proposal.metadata.get("date_window_start", ""))
+    end = _date_from_text(proposal.metadata.get("date_window_end", ""))
+    if start is None:
+        start = proposal.scheduled_date or proposal.due_date
+    if end is None:
+        end = start
+    return start, end
+
+
+def _date_from_text(value: str) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _same_actor(left: Proposal, right: Proposal) -> bool:
+    left_actors = _actor_set(left)
+    right_actors = _actor_set(right)
+    if "shared" in left_actors or "shared" in right_actors:
+        return bool(left_actors.intersection(right_actors | {"me", "teammate", "shared"}))
+    return bool(left_actors.intersection(right_actors))
+
+
+def _actor_set(proposal: Proposal) -> set[str]:
+    actors = {proposal.assigned_to, proposal.proposer_id}
+    participants = proposal.metadata.get("participants", "")
+    actors.update(item.strip() for item in participants.split(",") if item.strip())
+    return {item for item in actors if item and item != "unassigned"}
+
+
+def _ranges_overlap(left_start: date, left_end: date | None, right_start: date, right_end: date | None) -> bool:
+    return left_start <= (right_end or right_start) and right_start <= (left_end or left_start)
+
+
+def _conflict_message(proposal: Proposal, conflicts: tuple[Proposal, ...], request: ApprovalRequest) -> OutboundMessage:
+    conflict_lines = "\n".join(f"• {_human_event(item)}" for item in conflicts)
+    new_range = _date_label(proposal)
+    text = (
+        "_일정 충돌 확인이 필요합니다._\n"
+        f"새로 들어온 *{proposal.title}* 일정은 *{new_range}* 동안 기존 일정과 겹칩니다.\n\n"
+        f"*겹치는 확정 일정*\n{conflict_lines}\n\n"
+        "어떻게 처리할지 알려주세요.\n"
+        "예: `점심회식 불참 처리`, `출장 중에도 참석 가능`, `기존 일정 취소`, `일단 보류`"
+    )
+    return OutboundMessage(
+        surface="personal_chat",
+        recipient_id=request.approver_id,
+        message_type="schedule_conflict",
+        text=text,
+        proposal_id=proposal.proposal_id,
+        approval_request_id=request.request_id,
+        card={
+            "proposal_id": proposal.proposal_id,
+            "request_id": request.request_id,
+            "conflict_with": ",".join(item.proposal_id for item in conflicts),
+            "missing_slots": ",".join(proposal.missing_slots),
+        },
+    )
+
+
+def _human_event(proposal: Proposal) -> str:
+    parts = [f"*{proposal.title}*"]
+    when = _date_label(proposal)
+    if when:
+        parts.append(when)
+    if proposal.time_window:
+        parts.append(proposal.time_window)
+    location = proposal.metadata.get("location", "")
+    if location:
+        parts.append(location)
+    return " · ".join(parts)
+
+
+def _date_label(proposal: Proposal) -> str:
+    start, end = _proposal_date_range(proposal)
+    if start is None:
+        return ""
+    if end is not None and end != start:
+        return date_range_label(start, end)
+    return date_label(start)

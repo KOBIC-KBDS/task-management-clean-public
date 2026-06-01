@@ -1,0 +1,454 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+from typing import Any, Mapping, Protocol, Sequence
+
+from .domain import ApprovalRequest, IncomingMessage, Proposal
+from .operating_agent import (
+    OPERATING_AGENT_SCHEMA,
+    TeamTaskOperatingAgent,
+    OperatingAgentDecision,
+    RuleBasedTeamTaskOperatingAgent,
+    decision_from_payload,
+)
+from .semantic_context import build_operating_agent_context
+
+
+class CodexOperatingAgentError(RuntimeError):
+    """Raised when the optional Codex CLI operating-agent adapter cannot produce a valid decision."""
+
+
+@dataclass(frozen=True)
+class CodexCliOperatingAgentConfig:
+    codex_bin: str = "codex"
+    model: str = ""
+    cwd: Path = Path.cwd()
+    timeout_seconds: float = 180.0
+    fallback_on_error: bool = True
+    sandbox: str = "read-only"
+    ask_for_approval: str = "never"
+    strip_api_key_env: bool = True
+
+    @classmethod
+    def from_env(cls) -> "CodexCliOperatingAgentConfig":
+        return cls(
+            codex_bin=os.environ.get("TASK_MANAGEMENT_CODEX_BIN", "codex"),
+            model=os.environ.get("TASK_MANAGEMENT_CODEX_MODEL", ""),
+            cwd=Path(os.environ.get("TASK_MANAGEMENT_CODEX_CWD", str(Path.cwd()))),
+            timeout_seconds=float(os.environ.get("TASK_MANAGEMENT_CODEX_TIMEOUT_SECONDS", "180")),
+            fallback_on_error=os.environ.get("TASK_MANAGEMENT_CODEX_FALLBACK", "1").lower() not in {"0", "false", "no", "off"},
+            sandbox=os.environ.get("TASK_MANAGEMENT_CODEX_SANDBOX", "read-only"),
+            ask_for_approval=os.environ.get("TASK_MANAGEMENT_CODEX_APPROVAL", "never"),
+            strip_api_key_env=os.environ.get("TASK_MANAGEMENT_CODEX_STRIP_API_KEY_ENV", "1").lower()
+            not in {"0", "false", "no", "off"},
+        )
+
+
+class CodexExecRunner(Protocol):
+    def run_decision(self, prompt: str, *, schema: Mapping[str, Any], config: CodexCliOperatingAgentConfig) -> str:
+        """Return the final Codex response text."""
+
+
+class SubprocessCodexExecRunner:
+    """Run `codex exec` against the already logged-in local Codex session."""
+
+    def run_decision(self, prompt: str, *, schema: Mapping[str, Any], config: CodexCliOperatingAgentConfig) -> str:
+        with tempfile.TemporaryDirectory(prefix="task_management-codex-agent-") as tmp:
+            tmp_path = Path(tmp)
+            schema_path = tmp_path / "operating-agent.schema.json"
+            output_path = tmp_path / "decision.json"
+            schema_path.write_text(json.dumps(schema, ensure_ascii=False, indent=2), encoding="utf-8")
+            codex_bin = _resolve_codex_bin(config.codex_bin)
+            command = [
+                codex_bin,
+                "exec",
+                "--ephemeral",
+                "--cd",
+                str(config.cwd),
+                "--sandbox",
+                config.sandbox,
+                "--output-schema",
+                str(schema_path),
+                "--output-last-message",
+                str(output_path),
+                "-",
+            ]
+            if config.model:
+                command[2:2] = ["--model", config.model]
+            env = os.environ.copy()
+            if config.strip_api_key_env:
+                env.pop("OPENAI_API_KEY", None)
+                env.pop("CODEX_API_KEY", None)
+            completed = subprocess.run(  # noqa: S603 - executable is explicit user/local config
+                command,
+                input=prompt,
+                text=True,
+                capture_output=True,
+                cwd=config.cwd,
+                env=env,
+                timeout=config.timeout_seconds,
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise CodexOperatingAgentError(
+                    f"codex exec failed with exit={completed.returncode}: {completed.stderr.strip()}"
+                )
+            if output_path.exists():
+                return output_path.read_text(encoding="utf-8").strip()
+            if completed.stdout.strip():
+                return completed.stdout.strip()
+            raise CodexOperatingAgentError("codex exec produced no final response")
+
+
+class CodexCliOperatingAgent:
+    """Login-session Codex operating agent.
+
+    This adapter intentionally invokes `codex exec` instead of the OpenAI API. Auth is
+    delegated to the local Codex installation, so a ChatGPT login stored by `codex login`
+    can be used without passing an API key into task_management runtime code.
+    """
+
+    def __init__(
+        self,
+        config: CodexCliOperatingAgentConfig | None = None,
+        *,
+        runner: CodexExecRunner | None = None,
+        fallback_agent: TeamTaskOperatingAgent | None = None,
+    ) -> None:
+        self.config = config or CodexCliOperatingAgentConfig.from_env()
+        self.runner = runner or SubprocessCodexExecRunner()
+        self.fallback_agent = fallback_agent or RuleBasedTeamTaskOperatingAgent()
+
+    def decide(
+        self,
+        message: IncomingMessage,
+        *,
+        pending_approval_requests: Sequence[ApprovalRequest],
+        pending_proposals: Sequence[Proposal],
+    ) -> OperatingAgentDecision:
+        fallback_decision = self.fallback_agent.decide(
+            message,
+            pending_approval_requests=pending_approval_requests,
+            pending_proposals=pending_proposals,
+        )
+        try:
+            prompt = self._prompt(
+                message,
+                pending_approval_requests=pending_approval_requests,
+                pending_proposals=pending_proposals,
+                fallback_decision=fallback_decision,
+            )
+            text = self.runner.run_decision(
+                prompt,
+                schema=CODEX_DECISION_OUTPUT_SCHEMA,
+                config=self.config,
+            )
+            decision = decision_from_payload(_normalize_codex_payload(_loads_json_object(text)))
+            return replace(
+                decision,
+                source="codex_cli",
+                rationale=_with_codex_note(decision.rationale, self.config.model),
+            )
+        except Exception as exc:  # noqa: BLE001 - boundary catches model/process/schema failures for home-server stability
+            if not self.config.fallback_on_error:
+                raise CodexOperatingAgentError(str(exc)) from exc
+            return replace(
+                fallback_decision,
+                source="codex_cli_fallback",
+                rationale=f"Codex CLI operating agent unavailable or invalid; used rule fallback. reason={exc}",
+            )
+
+    def _prompt(
+        self,
+        message: IncomingMessage,
+        *,
+        pending_approval_requests: Sequence[ApprovalRequest],
+        pending_proposals: Sequence[Proposal],
+        fallback_decision: OperatingAgentDecision,
+    ) -> str:
+        context = build_operating_agent_context(
+            message,
+            pending_approval_requests=pending_approval_requests,
+            pending_proposals=pending_proposals,
+            fallback_decision=fallback_decision,
+        )
+        context["rules"]["auth_policy"] = "Use the local Codex login session only; do not ask for or output API keys."
+        return (
+            _SYSTEM_PROMPT
+            + "\n\nReturn only one JSON object matching the provided output schema.\n"
+            + "For proposal_drafts, encode metadata as metadata_json: a JSON object string with string values.\n"
+            + "For proposal_patches, encode temporal updates as temporal_update_json: a JSON object string with string values.\n"
+            + "Every proposal_patch must include target_confidence, evidence_text, assumptions, missing_slots, and needs_clarification.\n"
+            + "For completion/progress/deferral/confirmation/correction feedback, emit proposal_patches rather than new tasks. "
+            + "Use temporal_update_json keys status=done, status=confirmed, progress_status=partial|complete, "
+            + "progress_percent, remaining_work, completion_scope, and "
+            + "semantic_update_type=completion|progress|deferral|confirmation|correction as applicable. "
+            + "If only a preparation/material/subtask scope is complete while the parent task/event remains open, "
+            + "set completion_scope=preparation|materials|subtask and progress_status=complete; do not complete the parent.\n"
+            + "Use correction/title keys only when the user explicitly corrects an existing item: title or corrected_title, "
+            + "with semantic_update_type=correction. Use metadata keys the core understands: participants, external_owner, external_participants, participant_label, "
+            + "location, location_optional, date_window_start, date_window_end, needs_exact_date, needs_exact_time, materials, needs_prep, "
+            + "parent_proposal_id, parent_source_key, depends_on_proposal_ids, depends_on_source_keys, step_index, step_count, workflow_id, workflow_title, "
+            + "workflow_role, risk_level, risk_reason, requires_separate_approval.\n"
+            + "<task_management_context>\n"
+            + json.dumps(context, ensure_ascii=False, sort_keys=True, indent=2)
+            + "\n</task_management_context>\n"
+        )
+
+
+_SYSTEM_PROMPT = """You are the operating agent for a task_management task-management system.
+You run through Codex CLI using the user's local Codex login session.
+You do not mutate storage, approve proposals, write task-core files, or send calendar/Slack messages.
+Your job is only to interpret the current message and emit proposal drafts, proposal patches, or no_action.
+The deterministic core will enforce missing slots, approvals, idempotency, audit logs, and preview-only task-core export.
+Preserve Korean text as UTF-8. Use concise Korean titles when appropriate.
+Use source_key values that are stable for the message, such as codex/<message_id>/1.
+Use assigned_to only from me, teammate, shared, unassigned.
+Use item_type only from task, event, routine, reference, question, decision.
+If a user implies a category outside those item_type values, do not invent a new item_type. Use the closest existing type only when its operational behavior fits; otherwise ask a clarification question or create a decision item with metadata type_policy_needed=true and type_request=<requested label>.
+For allowlisted Slack notification messages (message.visibility=team and message_id starts with slack/), be conservative: create proposals only for clear actionable requests or commitments directed at the configured user; otherwise return no_action. Do not emit feedback patches from notification messages. The deterministic core will ask the user for confirmation before approving any notification-derived proposal.
+Use metadata keys that the core understands: participants for internal actors like me/teammate/shared,
+external_owner for the primary named non-task_management 담당자, external_participants for named non-task_management attendees/counterparts, participant_label for display names,
+location, location_optional, date_window_start/date_window_end/needs_exact_date, needs_exact_time, materials, needs_prep, parent_proposal_id,
+parent_source_key, depends_on_proposal_ids, depends_on_source_keys, step_index, step_count, workflow_id, workflow_title, workflow_role, risk_level, risk_reason, requires_separate_approval.
+When the message is a high-confidence sequence, use semantic-split-default: emit one parent proposal with metadata workflow_role=parent and ordered child proposals with parent_proposal_id or parent_source_key, step_index/step_count, workflow_id/workflow_title, and depends_on_proposal_ids/depends_on_source_keys when one step blocks another.
+If a child step sends external messages, changes commitments, deletes data, spends money, touches credentials, or is ambiguous, set requires_separate_approval=true with risk_level/risk_reason; do not hide risky work inside the grouped parent approval.
+When a private DM names an external work counterpart such as "A프로젝트 담당자 김OO 선생님", do not leave assigned_to unassigned merely because the named person is external. Set assigned_to to the internal owner (usually me), put the named counterpart in external_owner/external_participants/participant_label, and include participants=me for local review/reminder ownership.
+If the message is a follow-up batch for a pending/approved review task, preserve parent_proposal_id and inherit the parent review date/time unless the message says otherwise.
+For ambiguous date windows, put date_window_start/date_window_end/needs_exact_date in metadata and leave scheduled_date empty.
+If the message says a tentative future date will be decided in an already scheduled discussion, do not ask for the future exact date/time now. Emit the tentative future item as item_type=decision with disposition=decision_pending, keep the date_window metadata, omit needs_exact_date/needs_exact_time, and mark date_resolution_policy=decide_in_scheduled_discussion.
+For work/research discussions with a named external participant and no explicit venue requirement, set location_optional=true. Do not ask for a place merely because the discussion has a scheduled date/time.
+For event messages that only contain broad time hints like 점심, 오전, 오후, or 저녁, keep time_window as that broad hint, set metadata needs_exact_time=true, and do not invent an HH:MM time.
+For feedback, first resolve the semantic target proposal/request from pending_proposal_cards. Treat a message as feedback only when it contains explicit target evidence: a request/proposal id, direct title/semantic handle match, or reply/anaphora wording such as 이 건/방금 말한/그 일정/해당 일정. If the current message introduces a new task/event/routine without that evidence, emit create_proposals even when pending_proposal_cards exist. For a single pending clarification request, emit apply_feedback with the exact request_id/proposal_id from context.
+If one human reply updates multiple pending proposals, emit multiple proposal_patches. Do not collapse them into one patch.
+If target confidence is below 0.65 or the target is ambiguous, set needs_clarification=true and explain the missing target/slot instead of guessing.
+In proposal_patches.temporal_update_json, include semantic slot updates too, not only dates:
+participants, external_participants, participant_label, attendees, location, location_optional, scheduled_date, due_date, time_window.
+For completion/progress/deferral/confirmation/correction feedback, emit apply_feedback proposal_patches rather than a new task:
+- completion: temporal_update_json={"status":"done","semantic_update_type":"completion"}
+- progress: include progress_status=partial, progress_percent if known, remaining_work if stated, semantic_update_type=progress
+- deferral: include due_date or scheduled_date/time_window plus semantic_update_type=deferral
+- confirmation: include status=confirmed plus semantic_update_type=confirmation; keep the proposal status unchanged in core.
+- correction: include corrected title or metadata slots such as corrected_title/title, external_owner, external_participants, participant_label, participants, location/location_optional, due_date/scheduled_date/time_window, and semantic_update_type=correction; do not set status.
+- scoped completion: when only preparation/materials/subtask work is finished, include status=done, progress_status=complete,
+  completion_scope=preparation|materials|subtask, semantic_update_type=completion; core records progress, not parent completion.
+Each proposal_patch must include target_confidence, evidence_text, assumptions, missing_slots, and needs_clarification.
+If the deterministic_baseline is sufficient, return an equivalent decision with improved title/metadata only.
+Never request, print, or depend on an API key.
+"""
+
+
+CODEX_DECISION_OUTPUT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "schema",
+        "action",
+        "source",
+        "confidence",
+        "rationale",
+        "proposal_drafts",
+        "proposal_patches",
+        "clarification_questions",
+    ],
+    "properties": {
+        "schema": {"type": "string", "const": OPERATING_AGENT_SCHEMA},
+        "action": {"type": "string", "enum": ["create_proposals", "apply_feedback", "no_action"]},
+        "source": {"type": "string"},
+        "confidence": {"type": "number"},
+        "rationale": {"type": "string"},
+        "proposal_drafts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "source_key",
+                    "raw_text",
+                    "title",
+                    "discussion_id",
+                    "message_id",
+                    "line_number",
+                    "speaker",
+                    "assigned_to",
+                    "task_management_area",
+                    "due_date",
+                    "scheduled_date",
+                    "time_window",
+                    "task_status",
+                    "item_type",
+                    "disposition",
+                    "needs_review",
+                    "source_url",
+                    "source_export_path",
+                    "metadata_json",
+                ],
+                "properties": {
+                    "source_key": {"type": "string"},
+                    "raw_text": {"type": "string"},
+                    "title": {"type": "string"},
+                    "discussion_id": {"type": "string"},
+                    "message_id": {"type": "string"},
+                    "line_number": {"type": "integer"},
+                    "speaker": {"type": "string"},
+                    "assigned_to": {"type": "string", "enum": ["me", "teammate", "shared", "unassigned"]},
+                    "task_management_area": {"type": "string"},
+                    "due_date": {"type": "string"},
+                    "scheduled_date": {"type": "string"},
+                    "time_window": {"type": "string"},
+                    "task_status": {"type": "string"},
+                    "item_type": {"type": "string", "enum": ["task", "event", "routine", "reference", "question", "decision"]},
+                    "disposition": {"type": "string"},
+                    "needs_review": {"type": "boolean"},
+                    "source_url": {"type": "string"},
+                    "source_export_path": {"type": "string"},
+                    "metadata_json": {"type": "string"},
+                },
+            },
+        },
+        "proposal_patches": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "request_id",
+                    "proposal_id",
+                    "actor_id",
+                    "body",
+                    "temporal_update_json",
+                    "reason",
+                    "target_confidence",
+                    "evidence_text",
+                    "assumptions",
+                    "missing_slots",
+                    "needs_clarification",
+                ],
+                "properties": {
+                    "request_id": {"type": "string"},
+                    "proposal_id": {"type": "string"},
+                    "actor_id": {"type": "string"},
+                    "body": {"type": "string"},
+                    "temporal_update_json": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "target_confidence": {"type": "number"},
+                    "evidence_text": {"type": "string"},
+                    "assumptions": {"type": "array", "items": {"type": "string"}},
+                    "missing_slots": {"type": "array", "items": {"type": "string"}},
+                    "needs_clarification": {"type": "boolean"},
+                },
+            },
+        },
+        "clarification_questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["recipient_id", "prompt", "proposal_id", "missing_slots"],
+                "properties": {
+                    "recipient_id": {"type": "string"},
+                    "prompt": {"type": "string"},
+                    "proposal_id": {"type": "string"},
+                    "missing_slots": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+    },
+}
+
+
+def _loads_json_object(text: str) -> Mapping[str, object]:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`").strip()
+        if stripped.lower().startswith("json"):
+            stripped = stripped[4:].strip()
+    payload = json.loads(stripped)
+    if not isinstance(payload, Mapping):
+        raise CodexOperatingAgentError("Codex output was not a JSON object")
+    return payload
+
+
+def _normalize_codex_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
+    normalized = dict(payload)
+    drafts = []
+    for item in payload.get("proposal_drafts", []) or []:
+        if not isinstance(item, Mapping):
+            drafts.append(item)
+            continue
+        draft = dict(item)
+        if "metadata_json" in draft:
+            draft["metadata"] = _json_string_object(draft.pop("metadata_json"), "metadata_json")
+        if isinstance(draft.get("metadata"), Mapping):
+            draft["metadata"] = _normalize_metadata(
+                draft["metadata"],
+                raw_text=str(draft.get("raw_text", "")),
+                title=str(draft.get("title", "")),
+            )
+        drafts.append(draft)
+    patches = []
+    for item in payload.get("proposal_patches", []) or []:
+        if not isinstance(item, Mapping):
+            patches.append(item)
+            continue
+        patch = dict(item)
+        if "temporal_update_json" in patch:
+            patch["temporal_update"] = _json_string_object(patch.pop("temporal_update_json"), "temporal_update_json")
+        patch.setdefault("target_confidence", 1.0)
+        patch.setdefault("evidence_text", str(patch.get("body", "")))
+        patch.setdefault("assumptions", [])
+        patch.setdefault("missing_slots", [])
+        patch.setdefault("needs_clarification", False)
+        patches.append(patch)
+    normalized["proposal_drafts"] = drafts
+    normalized["proposal_patches"] = patches
+    return normalized
+
+
+def _json_string_object(value: object, label: str) -> dict[str, str]:
+    if not isinstance(value, str):
+        raise CodexOperatingAgentError(f"{label} must be a string")
+    payload = json.loads(value or "{}")
+    if not isinstance(payload, Mapping):
+        raise CodexOperatingAgentError(f"{label} must decode to an object")
+    return {str(key): str(item) for key, item in payload.items()}
+
+
+def _normalize_metadata(metadata: Mapping[str, object], *, raw_text: str, title: str) -> dict[str, str]:
+    normalized = {str(key): str(item) for key, item in metadata.items()}
+    attendees = normalized.get("attendees", "")
+    if attendees and not normalized.get("external_participants"):
+        normalized["external_participants"] = attendees
+    if attendees and not normalized.get("participant_label"):
+        normalized["participant_label"] = attendees
+    text = f"{raw_text} {title} {attendees}"
+    if not normalized.get("participants") and ("나" in text or "me" in text):
+        normalized["participants"] = "me"
+    if not normalized.get("location") and any(token in text for token in ("배석", "발표", "리뷰위원회")):
+        normalized["location_optional"] = "true"
+    return normalized
+
+
+def _resolve_codex_bin(codex_bin: str) -> str:
+    resolved = shutil.which(codex_bin)
+    if resolved:
+        return resolved
+    if os.name == "nt" and not codex_bin.lower().endswith((".cmd", ".exe", ".ps1")):
+        for suffix in (".cmd", ".exe"):
+            resolved = shutil.which(f"{codex_bin}{suffix}")
+            if resolved:
+                return resolved
+    return codex_bin
+
+
+def _with_codex_note(rationale: str, model: str) -> str:
+    note = "codex_cli_login_session"
+    if model:
+        note = f"{note}; model={model}"
+    return f"{rationale} ({note})" if rationale else note

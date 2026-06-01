@@ -1,0 +1,23 @@
+[project]
+name = "example-task-management"
+version = "0.1.0"
+description = "Private Slack-first team task-management adapter that references task-core externally."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+slack-socket = [
+  "websockets>=16,<17",
+]
+
+[project.scripts]
+task-management = "task_management.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["task_management*"]
+
+[tool.pytest.ini_options]
+pythonpath = [
+  ".",
+]
+testpaths = ["tests"]

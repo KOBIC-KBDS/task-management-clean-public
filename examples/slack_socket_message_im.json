@@ -1,0 +1,24 @@
+[
+  {
+    "type": "hello",
+    "num_connections": 1
+  },
+  {
+    "type": "events_api",
+    "envelope_id": "env-demo-1",
+    "accepts_response_payload": false,
+    "payload": {
+      "type": "event_callback",
+      "event_id": "Ev-demo-1",
+      "event": {
+        "type": "message",
+        "channel": "DTEST",
+        "user": "UUSER",
+        "text": "내가 내일 보고서 확인할게",
+        "ts": "1779167000.000001",
+        "event_ts": "1779167000.000001",
+        "channel_type": "im"
+      }
+    }
+  }
+]
