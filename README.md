@@ -17,6 +17,8 @@ Slack app message + active local task context
 
 Rules/keyword parsing is a fallback and test aid, not the product core.
 
+For a codeboarding-style map of where Codex/Claude intervenes and where deterministic policy takes over, see [`docs/agent-flow.md`](docs/agent-flow.md).
+
 ## Deployment model
 
 Slack is only the chat channel. It is not the owner of the task-management system.
