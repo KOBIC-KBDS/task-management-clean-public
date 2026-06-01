@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,19 @@ from task_management.simulator import TeamTaskSimulator
 
 
 NOW = datetime(2026, 5, 5, 10, 0, 0)
+
+
+def _clear_local_loader_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in (
+        "SLACK_BOT_TOKEN",
+        "SLACK_APP_TOKEN",
+        "SLACK_DM_CHANNEL_ID",
+        "SLACK_USER_ID",
+        "TASK_MANAGEMENT_INSTANCE_ID",
+        "TASK_MANAGEMENT_ALLOWED_INSTANCE_ID",
+        "TASK_MANAGEMENT_STATE",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_chat_command_parser_supports_korean_reply_commands() -> None:
@@ -381,6 +395,130 @@ def test_cli_slack_doctor_reports_ready_env_without_token_leak(tmp_path: Path, m
     assert result["live_open_dm"] == {"attempted": False}
     assert result["safety"]["slack_scope"] == "personal_dm_only"
     assert "xoxb-test" not in json.dumps(result)
+
+
+def test_cli_loads_env_local_and_overrides_inherited_live_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _clear_local_loader_env(monkeypatch)
+    (tmp_path / ".env.local").write_text(
+        "\n".join(
+            [
+                "SLACK_BOT_TOKEN=xoxb-demo",
+                "SLACK_DM_CHANNEL_ID=DDEMO",
+                "TASK_MANAGEMENT_INSTANCE_ID=clean-demo",
+                "TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-live")
+    monkeypatch.setenv("SLACK_DM_CHANNEL_ID", "DPROD")
+
+    main(["--state", str(tmp_path / "state"), "slack-doctor"])
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is True
+    assert result["can_send"] is True
+    assert result["instance_id"] == "clean-demo"
+    assert result["allowed_instance_id"] == "clean-demo"
+    assert result["instance_guard_ok"] is True
+    assert os.environ["SLACK_BOT_TOKEN"] == "xoxb-demo"
+    assert os.environ["SLACK_DM_CHANNEL_ID"] == "DDEMO"
+    assert "xoxb-live" not in json.dumps(result)
+    assert "xoxb-demo" not in json.dumps(result)
+
+
+def test_blank_env_local_values_clear_inherited_slack_tokens(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _clear_local_loader_env(monkeypatch)
+    (tmp_path / ".env.local").write_text(
+        "\n".join(
+            [
+                "SLACK_BOT_TOKEN=",
+                "SLACK_APP_TOKEN=",
+                "SLACK_DM_CHANNEL_ID=",
+                "SLACK_USER_ID=",
+                "TASK_MANAGEMENT_INSTANCE_ID=clean-demo",
+                "TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-live")
+    monkeypatch.setenv("SLACK_DM_CHANNEL_ID", "DPROD")
+    monkeypatch.setenv("SLACK_USER_ID", "UPROD")
+
+    with pytest.raises(SystemExit, match="not ready"):
+        main(["--state", str(tmp_path / "state"), "slack-doctor", "--strict"])
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is False
+    assert result["can_send"] is False
+    assert any("SLACK_BOT_TOKEN" in error for error in result["errors"])
+    assert os.environ["SLACK_BOT_TOKEN"] == ""
+    assert os.environ["SLACK_DM_CHANNEL_ID"] == ""
+    assert os.environ["SLACK_USER_ID"] == ""
+
+
+def test_cli_loads_markdown_env_table_after_blank_env_local(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _clear_local_loader_env(monkeypatch)
+    (tmp_path / ".env.local").write_text(
+        "\n".join(
+            [
+                "SLACK_BOT_TOKEN=",
+                "SLACK_DM_CHANNEL_ID=",
+                "TASK_MANAGEMENT_INSTANCE_ID=clean-demo",
+                "TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / ".env.local.md").write_text(
+        "\n".join(
+            [
+                "# Local values",
+                "",
+                "| Key | Value |",
+                "| --- | --- |",
+                "| SLACK_BOT_TOKEN | xoxb-demo |",
+                "| SLACK_DM_CHANNEL_ID | DDEMO |",
+                "| TASK_MANAGEMENT_STATE | .state-md |",
+                "| TASK_MANAGEMENT_INSTANCE_ID | clean-demo-md |",
+                "| TASK_MANAGEMENT_ALLOWED_INSTANCE_ID | clean-demo-md |",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-live")
+    monkeypatch.setenv("SLACK_DM_CHANNEL_ID", "DPROD")
+
+    main(["slack-doctor"])
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is True
+    assert result["can_send"] is True
+    assert result["instance_id"] == "clean-demo-md"
+    assert result["allowed_instance_id"] == "clean-demo-md"
+    assert os.environ["SLACK_BOT_TOKEN"] == "xoxb-demo"
+    assert os.environ["SLACK_DM_CHANNEL_ID"] == "DDEMO"
+    assert (tmp_path / ".state-md" / "task_management.sqlite3").exists()
 
 
 def test_cli_slack_doctor_strict_exits_when_env_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:

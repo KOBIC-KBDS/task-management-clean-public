@@ -38,10 +38,10 @@ That means each private deployment can attach its own Slack app/bot account to t
    `claude` login). No OpenAI/Anthropic API key is required for the login-session
    modes.
 4. Create/install a private Slack app in the target workspace.
-5. Set local Slack token/channel environment variables.
+5. Copy `.env.example` to `.env.local`, then fill only the new Slack app values.
 6. Run the same `slack-fast-cycle` or `slack-socket-loop` command.
 
-Different teams or individuals may therefore run isolated deployments with different Slack apps, state directories, and semantic CLI login sessions while sharing the same source code. Do not commit any deployment-specific token, Slack transcript, dashboard output, SQLite DB, or JSONL log.
+Different teams or individuals may therefore run isolated deployments with different Slack apps, state directories, and semantic CLI login sessions while sharing the same source code. Do not commit any deployment-specific token, Slack transcript, dashboard output, SQLite DB, or JSONL log. A clean install should start with blank Slack token values in `.env.local`; filling those blanks with tokens from a newly created Slack app is the handoff point from source checkout to live deployment.
 
 ## Scope
 
@@ -86,21 +86,31 @@ Required bot scopes for DM mode:
 
 Socket Mode additionally needs an app-level token (`xapp-...`) and subscribed events such as `message.im`.
 
-Example local environment:
+Recommended clean install setup:
 
 ```powershell
-$env:SLACK_BOT_TOKEN = "xoxb-..."
-$env:SLACK_APP_TOKEN = "xapp-..."
-$env:SLACK_USER_ID = "U..."
-$env:SLACK_DM_CHANNEL_ID = "D..."
-$env:TASK_MANAGEMENT_SLACK_ACTOR_ID = "me"
-$env:TASK_MANAGEMENT_OPERATING_AGENT = "codex"
-$env:TASK_MANAGEMENT_CODEX_MODEL = "gpt-5.5"
-# Or:
-# $env:TASK_MANAGEMENT_OPERATING_AGENT = "claude"
-# $env:TASK_MANAGEMENT_CLAUDE_MODEL = "sonnet"
-# $env:TASK_MANAGEMENT_CLAUDE_FALLBACK = "0"
+Copy-Item .env.example .env.local
+Copy-Item ops/local_env_markdown_template.md .env.local.md
 ```
+
+Then edit either `.env.local` or `.env.local.md` and fill only values from the
+new Slack app/workspace. The Markdown template is useful when following a
+screenshot-based Slack app setup guide because each token/id has its own row:
+
+```text
+SLACK_BOT_TOKEN=
+SLACK_APP_TOKEN=
+SLACK_USER_ID=
+SLACK_DM_CHANNEL_ID=
+TASK_MANAGEMENT_INSTANCE_ID=clean-demo
+TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo
+```
+
+The CLI automatically loads `.env.local` and then `.env.local.md` from the
+current working directory. Values in those files override inherited shell
+variables, including blank values, so a clean checkout does not accidentally
+reuse operational Slack tokens from another machine. To disable auto-loading for
+debugging, set `TASK_MANAGEMENT_LOAD_ENV_LOCAL=0` before running the CLI.
 
 Use doctor commands before live sends:
 

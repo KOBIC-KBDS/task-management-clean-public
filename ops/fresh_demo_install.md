@@ -11,12 +11,13 @@ The clean repository should contain:
 - tests,
 - setup and operations documents,
 - `.env.example` with placeholder key names only,
+- `ops/local_env_markdown_template.md` with empty paste targets,
 - launchd/script templates.
 
 The clean repository must not contain:
 
 - Slack bot or app tokens,
-- `.env` or `.env.local`,
+- `.env`, `.env.local`, or `.env.local.md`,
 - SQLite databases,
 - JSONL event logs,
 - Slack transcripts,
@@ -92,7 +93,7 @@ $env:TASK_CORE_PATH = "C:\path\to\task-core"
 
 Choose one login-session backend. Both paths keep Slack sends, SQLite writes,
 approvals, and task-core preview validation in the deterministic Python core.
-Do not put API keys in `.env.local`.
+Do not put API keys in `.env.local` or `.env.local.md`.
 
 ### Option A: Codex CLI
 
@@ -175,50 +176,45 @@ For a screenshot-oriented settings checklist, see
 
 ## 5. Create local configuration
 
-Copy the example file locally and edit the values. The copied file is ignored by
-Git.
+Copy the example files locally and edit the values. The copied files are ignored
+by Git.
 
 ```bash
 cp .env.example .env.local
+cp ops/local_env_markdown_template.md .env.local.md
 ```
 
-Minimum demo values:
+Recommended workflow:
 
-```bash
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...
-SLACK_USER_ID=U...
-TASK_MANAGEMENT_SLACK_ACTOR_ID=me
-TASK_MANAGEMENT_OPERATING_AGENT=codex
-TASK_MANAGEMENT_CODEX_MODEL=gpt-5.5
-# Or use:
-# TASK_MANAGEMENT_OPERATING_AGENT=claude
-# TASK_MANAGEMENT_CLAUDE_MODEL=sonnet
-# TASK_MANAGEMENT_CLAUDE_FALLBACK=0
-TASK_MANAGEMENT_STATE=.task-management-demo
-TASK_MANAGEMENT_DASHBOARD_URL=http://127.0.0.1:8787/demo-dashboard.html
+1. Keep `.env.local` as the blank/default guard file.
+2. Follow the Slack app settings guide and screenshots.
+3. Paste each token/id into the matching row in `.env.local.md`.
+
+Minimum demo values in `.env.local.md`:
+
+```text
+SLACK_BOT_TOKEN=
+SLACK_APP_TOKEN=
+SLACK_USER_ID=
+SLACK_DM_CHANNEL_ID=
+TASK_MANAGEMENT_INSTANCE_ID=clean-demo
+TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo
 ```
 
 If you already know the app DM channel, also set:
 
-```bash
+```text
 SLACK_DM_CHANNEL_ID=D...
 ```
 
 If not, the doctor command in the next step can resolve it with
 `conversations.open`.
 
-For macOS/Linux direct CLI commands, load `.env.local` into the current shell:
-
-```bash
-set -a
-source .env.local
-set +a
-```
-
-The provided wrapper scripts also load `.env.local` automatically. Windows
-PowerShell users can instead set the same variables with `$env:...` commands in
-the current session.
+The CLI automatically loads `.env.local` first and `.env.local.md` second from
+the current working directory. Values in those files override inherited shell
+variables, including blank values, so a fresh clean install does not reuse
+tokens from another operational machine. Set `TASK_MANAGEMENT_LOAD_ENV_LOCAL=0`
+only when you intentionally want to debug without local file loading.
 
 ## 6. Create the empty demo database
 

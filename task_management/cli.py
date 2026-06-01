@@ -7,6 +7,7 @@ from datetime import date, datetime
 import json
 import os
 from pathlib import Path
+import re
 import time
 from typing import Sequence
 
@@ -67,9 +68,126 @@ from .slack_socket import (
 from .store import TeamTaskStore
 
 
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _set_env_value(key: str, value: str, *, override: bool) -> bool:
+    key = key.strip()
+    if not _ENV_KEY_RE.fullmatch(key):
+        return False
+    if override or key not in os.environ:
+        os.environ[key] = value
+    return True
+
+
+def _clean_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    if len(value) >= 2 and value[0] == value[-1] == "`":
+        value = value[1:-1]
+    return value.strip()
+
+
+def _parse_env_assignment(line: str) -> tuple[str, str] | None:
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    if line.startswith("export "):
+        line = line[len("export ") :].lstrip()
+    if line.startswith("$env:"):
+        line = line[len("$env:") :]
+    if "=" in line:
+        key, value = line.split("=", 1)
+        return key.strip(), _clean_env_value(value)
+    stripped = line.lstrip("-* ").strip()
+    if ":" in stripped:
+        key, value = stripped.split(":", 1)
+        return key.strip(), _clean_env_value(value)
+    return None
+
+
+def load_env_local(path: Path = Path(".env.local"), *, override: bool = True) -> bool:
+    """Load KEY=VALUE pairs from a local .env.local file.
+
+    The clean deployment path treats .env.local as the local instance contract.
+    Values in the file intentionally override inherited shell variables by
+    default, including empty values, so a fresh checkout can clear unrelated
+    operational Slack tokens that happen to be present in the parent shell.
+    """
+
+    if os.environ.get("TASK_MANAGEMENT_LOAD_ENV_LOCAL", "1").lower() in {"0", "false", "no", "off"}:
+        return False
+    loaded = False
+    if not path.exists():
+        return load_env_markdown(override=override)
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        parsed = _parse_env_assignment(raw_line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        loaded = _set_env_value(key, value, override=override) or loaded
+    return load_env_markdown(override=override) or loaded
+
+
+def load_env_markdown(path: Path = Path(".env.local.md"), *, override: bool = True) -> bool:
+    """Load local deployment values from a Markdown checklist/table file."""
+
+    if not path.exists():
+        return False
+    loaded = False
+    in_fence = False
+    pending_heading_key: str | None = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            pending_heading_key = None
+            continue
+        if in_fence:
+            parsed = _parse_env_assignment(stripped)
+            if parsed is not None:
+                key, value = parsed
+                loaded = _set_env_value(key, value, override=override) or loaded
+            continue
+
+        if not stripped:
+            continue
+        if stripped.startswith("|") and stripped.endswith("|"):
+            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+            if len(cells) >= 2 and not set(cells[0]) <= {"-", ":"}:
+                key = cells[0].strip("` ")
+                if key.lower() not in {"key", "name", "variable", "env"}:
+                    value = _clean_env_value(cells[1])
+                    loaded = _set_env_value(key, value, override=override) or loaded
+            pending_heading_key = None
+            continue
+
+        heading = re.match(r"^#{2,6}\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s*$", stripped)
+        if heading:
+            pending_heading_key = heading.group(1)
+            continue
+        if pending_heading_key is not None:
+            loaded = _set_env_value(pending_heading_key, _clean_env_value(stripped), override=override) or loaded
+            pending_heading_key = None
+            continue
+
+        parsed = _parse_env_assignment(stripped)
+        if parsed is not None:
+            key, value = parsed
+            loaded = _set_env_value(key, value, override=override) or loaded
+            pending_heading_key = None
+    return loaded
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Team task orchestration utilities.")
-    parser.add_argument("--state", type=Path, default=Path(".task-management"), help="State directory for SQLite/JSONL.")
+    parser.add_argument(
+        "--state",
+        type=Path,
+        default=Path(os.environ.get("TASK_MANAGEMENT_STATE", ".task-management")),
+        help="State directory for SQLite/JSONL. Default: TASK_MANAGEMENT_STATE or .task-management.",
+    )
     parser.add_argument(
         "--agent",
         choices=["auto", "rule", "codex", "claude", "openai"],
@@ -339,6 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    load_env_local()
     args = build_parser().parse_args(argv)
     args.agent = _resolve_operating_agent_name(
         args.agent,

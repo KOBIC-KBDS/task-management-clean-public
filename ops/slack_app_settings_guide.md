@@ -19,26 +19,28 @@
 
 ## 설정 산출물
 
-설정이 끝나면 로컬 `.env.local` 또는 shell 환경에 아래 값을 넣습니다.
+설정이 끝나면 `ops/local_env_markdown_template.md`를 `.env.local.md`로
+복사하고, 아래 항목별 값 칸에 새 Slack app 값을 붙여넣습니다. 실제
+`.env.local.md` 파일은 Git에 올리지 않습니다.
 
-```bash
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...
-SLACK_USER_ID=U...
-SLACK_DM_CHANNEL_ID=D...
-SLACK_BOT_USER_ID=U...
+```text
+SLACK_BOT_TOKEN=
+SLACK_APP_TOKEN=
+SLACK_USER_ID=
+SLACK_DM_CHANNEL_ID=
+SLACK_BOT_USER_ID=
 TASK_MANAGEMENT_STATE=.task-management-demo
-TASK_MANAGEMENT_OPERATING_AGENT=codex
-TASK_MANAGEMENT_CODEX_MODEL=gpt-5.5
-# Or choose Claude Code:
-# TASK_MANAGEMENT_OPERATING_AGENT=claude
-# TASK_MANAGEMENT_CLAUDE_MODEL=sonnet
-# TASK_MANAGEMENT_CLAUDE_FALLBACK=0
+TASK_MANAGEMENT_INSTANCE_ID=clean-demo
+TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo
 ```
 
 `SLACK_DM_CHANNEL_ID`와 `SLACK_BOT_USER_ID`는 처음부터 모르면 비워둘 수
 있습니다. `slack-doctor --live-open-dm`으로 DM channel을 resolve한 뒤
 고정하면 됩니다.
+
+CLI는 현재 작업 디렉토리의 `.env.local`을 먼저, `.env.local.md`를 나중에
+자동 로드합니다. 빈 값도 기존 shell 환경변수를 덮어쓰므로, clean 설치가
+다른 운영 머신의 Slack token을 상속하지 않습니다.
 
 ## 0. Slack app 생성
 
@@ -238,13 +240,8 @@ Slack client에서:
 
 ## 7. 로컬 doctor로 설정 검증
 
-`.env.local`을 shell에 load한 뒤 실행합니다.
-
-```bash
-set -a
-source .env.local
-set +a
-```
+`.env.local.md`에 값을 붙여넣은 뒤 repo 루트에서 실행합니다. CLI가
+`.env.local`과 `.env.local.md`를 자동 로드합니다.
 
 DM/Web API 설정 확인:
 

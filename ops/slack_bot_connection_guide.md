@@ -128,20 +128,29 @@ For user-to-bot DM entry:
 Optional Canvas publishing requires an additional token/scope path such as
 `canvases:write`; keep that separate from the first DM intake test.
 
-## 4. Set local Slack environment
+## 4. Create local Slack configuration
 
 ```powershell
-$env:SLACK_BOT_TOKEN = "xoxb-..."
-$env:SLACK_APP_TOKEN = "xapp-..."       # Socket Mode only
-$env:SLACK_USER_ID = "U..."             # your Slack user id
-$env:TASK_MANAGEMENT_SLACK_ACTOR_ID = "me"
-$env:TASK_MANAGEMENT_OPERATING_AGENT = "codex"
-$env:TASK_MANAGEMENT_CODEX_MODEL = "gpt-5.5"
-# Or:
-# $env:TASK_MANAGEMENT_OPERATING_AGENT = "claude"
-# $env:TASK_MANAGEMENT_CLAUDE_MODEL = "sonnet"
-# $env:TASK_MANAGEMENT_CLAUDE_FALLBACK = "0"
+Copy-Item .env.example .env.local
+Copy-Item ops/local_env_markdown_template.md .env.local.md
 ```
+
+Paste values from the new Slack app into `.env.local.md`. The recommended
+minimum rows are:
+
+```text
+SLACK_BOT_TOKEN=
+SLACK_APP_TOKEN=
+SLACK_USER_ID=
+SLACK_DM_CHANNEL_ID=
+TASK_MANAGEMENT_INSTANCE_ID=clean-demo
+TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo
+```
+
+The CLI automatically loads `.env.local` and then `.env.local.md` from the
+current working directory. This intentionally overrides inherited shell
+variables, including blank values, so a clean installation does not accidentally
+reuse Slack tokens from another machine.
 
 Choose an isolated state directory for this workspace. The first command that
 opens the store creates the SQLite database and JSONL audit log automatically:
