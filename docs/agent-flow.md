@@ -2,6 +2,8 @@
 
 This page is a codeboarding-style map of where the semantic CLI agent enters the system and where deterministic code takes over. It is intentionally high-level so a new operator can understand the runtime before connecting a real Slack workspace.
 
+For a clickable animation, clone the repository and open [`docs/agent-flow-demo/index.html`](agent-flow-demo/index.html) locally. The demo is standalone and does not contain Slack tokens or workspace identifiers.
+
 ## One-line model
 
 Slack delivers messages; Codex or Claude Code interprets intent; this repository validates, persists, renders, and replies.

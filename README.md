@@ -18,6 +18,7 @@ Slack app message + active local task context
 Rules/keyword parsing is a fallback and test aid, not the product core.
 
 For a codeboarding-style map of where Codex/Claude intervenes and where deterministic policy takes over, see [`docs/agent-flow.md`](docs/agent-flow.md).
+A standalone interactive runtime-flow demo is available at [`docs/agent-flow-demo/index.html`](docs/agent-flow-demo/index.html); clone the repo and open the file locally to use the animation controls.
 
 ## Deployment model
 
