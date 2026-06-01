@@ -380,6 +380,7 @@ def test_cli_dogfood_loop_rejects_zero_interval_without_cycle_cap(tmp_path: Path
 
 
 def test_cli_slack_doctor_reports_ready_env_without_token_leak(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    _clear_local_loader_env(monkeypatch)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setenv("SLACK_DM_CHANNEL_ID", "DTEST")
     monkeypatch.setenv("SLACK_BOT_USER_ID", "U_BOT")
@@ -540,6 +541,7 @@ def test_cli_slack_doctor_live_open_dm_rejects_non_personal_dm_result(
     monkeypatch: pytest.MonkeyPatch,
     capsys,
 ) -> None:
+    _clear_local_loader_env(monkeypatch)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.delenv("SLACK_DM_CHANNEL_ID", raising=False)
     monkeypatch.setenv("SLACK_USER_ID", "UUSER")
@@ -573,6 +575,7 @@ def test_cli_slack_doctor_strict_fails_when_live_open_dm_resolution_is_not_perso
     monkeypatch: pytest.MonkeyPatch,
     capsys,
 ) -> None:
+    _clear_local_loader_env(monkeypatch)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.delenv("SLACK_DM_CHANNEL_ID", raising=False)
     monkeypatch.setenv("SLACK_USER_ID", "UUSER")

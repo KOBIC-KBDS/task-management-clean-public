@@ -12,7 +12,7 @@ COMMAND_RE = re.compile(
     re.IGNORECASE,
 )
 INSTANCE_PROBE_RE = re.compile(
-    r"^\s*(?:mac-mini-only|macmini-only|맥미니전용응답)\s+"
+    r"^\s*(?:instance-only|instance-probe|인스턴스전용응답)\s+"
     r"(?P<target_instance_id>\S+)\s+(?P<nonce>\S+)(?:\s+(?P<body>.+))?\s*$",
     re.IGNORECASE,
 )

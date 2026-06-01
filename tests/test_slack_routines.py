@@ -470,8 +470,8 @@ def test_slack_live_config_guard_disables_send_for_wrong_runtime_instance() -> N
             actor_id="me",
             dm_channel_id="D123",
             bot_token="xoxb-test",
-            instance_id="windows-a",
-            allowed_instance_id="mac-mini-b",
+            instance_id="instance-a",
+            allowed_instance_id="instance-b",
         )
     )
 
@@ -479,7 +479,7 @@ def test_slack_live_config_guard_disables_send_for_wrong_runtime_instance() -> N
     assert check.can_poll is True
     assert check.can_send is False
     assert check.instance_guard_ok is False
-    assert any("expected 'mac-mini-b'" in error for error in check.errors)
+    assert any("expected 'instance-b'" in error for error in check.errors)
 
 
 def test_slack_send_guard_rejects_wrong_runtime_instance() -> None:
@@ -488,13 +488,13 @@ def test_slack_send_guard_rejects_wrong_runtime_instance() -> None:
         SlackDmConfig(
             actor_id="me",
             dm_channel_id="DTEST",
-            instance_id="windows-a",
-            allowed_instance_id="mac-mini-b",
+            instance_id="instance-a",
+            allowed_instance_id="instance-b",
         ),
         client,
     )
 
-    with pytest.raises(SlackAdapterError, match="expected 'mac-mini-b'"):
+    with pytest.raises(SlackAdapterError, match="expected 'instance-b'"):
         adapter.send_personal("me", "should not send")
 
     assert client.sent == []
@@ -502,32 +502,32 @@ def test_slack_send_guard_rejects_wrong_runtime_instance() -> None:
 
 def test_instance_probe_replies_only_on_target_instance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = _store(tmp_path)
-    monkeypatch.setenv("TASK_MANAGEMENT_INSTANCE_ID", "mac-mini-b")
+    monkeypatch.setenv("TASK_MANAGEMENT_INSTANCE_ID", "instance-a")
     message = IncomingMessage(
         message_id="slack/DTEST/1",
         sender_id="me",
         chat_id="DTEST",
         visibility="private",
-        text="mac-mini-only mac-mini-b nonce-1",
+        text="instance-only instance-a nonce-1",
         received_at=NOW,
     )
 
     result = TeamTaskOrchestrator(store).handle_message(message)
 
     assert len(result.outbound_messages) == 1
-    assert "MAC_MINI_B_OK nonce-1" in result.outbound_messages[0].text
+    assert "INSTANCE_OK nonce-1" in result.outbound_messages[0].text
     assert [event["type"] for event in store.read_events()].count("instance_probe.accepted") == 1
 
 
 def test_instance_probe_is_ignored_on_non_target_instance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = _store(tmp_path)
-    monkeypatch.setenv("TASK_MANAGEMENT_INSTANCE_ID", "windows-a")
+    monkeypatch.setenv("TASK_MANAGEMENT_INSTANCE_ID", "other-instance")
     message = IncomingMessage(
         message_id="slack/DTEST/1",
         sender_id="me",
         chat_id="DTEST",
         visibility="private",
-        text="mac-mini-only mac-mini-b nonce-1",
+        text="instance-only instance-a nonce-1",
         received_at=NOW,
     )
 

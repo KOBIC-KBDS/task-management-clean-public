@@ -5,6 +5,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from task_management.cli import main
 from task_management.orchestrator import TeamTaskOrchestrator
 from task_management.slack_adapter import FakeSlackWebClient, SlackDmAdapter, SlackDmConfig
@@ -502,7 +504,18 @@ def test_socket_loop_reconnects_after_transient_websocket_error(tmp_path: Path) 
     assert "slack.socket.event.handled" in event_types
 
 
-def test_slack_socket_loop_cli_processes_local_transcript(tmp_path: Path, capsys) -> None:
+def test_slack_socket_loop_cli_processes_local_transcript(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    for _key in (
+        "SLACK_BOT_TOKEN",
+        "SLACK_APP_TOKEN",
+        "SLACK_DM_CHANNEL_ID",
+        "SLACK_USER_ID",
+        "TASK_MANAGEMENT_INSTANCE_ID",
+        "TASK_MANAGEMENT_ALLOWED_INSTANCE_ID",
+    ):
+        monkeypatch.delenv(_key, raising=False)
     transcript = tmp_path / "events.json"
     transcript.write_text(json.dumps([_message_im_envelope()], ensure_ascii=False), encoding="utf-8")
     dashboard = tmp_path / "dashboard.html"

@@ -538,9 +538,9 @@ class TeamTaskOrchestrator:
                     recipient_id=message.sender_id,
                     message_type="instance_probe",
                     text=(
-                        f"MAC_MINI_B_OK {probe.nonce}\n"
+                        f"INSTANCE_OK {probe.nonce}\n"
                         f"instance_id={instance_id}\n"
-                        "이 응답은 Mac mini B 인스턴스에서만 전송되도록 설정된 테스트 응답입니다."
+                        "이 응답은 지정된 인스턴스에서만 전송되도록 설정된 테스트 응답입니다."
                     ),
                     card={
                         "dedupe_key": f"instance-probe/{instance_id}/{probe.nonce}",
