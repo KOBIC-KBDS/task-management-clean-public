@@ -9,6 +9,13 @@ dependencies = []
 slack-socket = [
   "websockets>=16,<17",
 ]
+test = [
+  "pytest",
+  # task_core_bridge integration tests import the external task-core checkout,
+  # which needs these at import time:
+  "PyYAML>=6.0",
+  "pdfminer.six>=20231228",
+]
 
 [project.scripts]
 task-management = "task_management.cli:main"

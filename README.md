@@ -59,10 +59,12 @@ Different teams or individuals may therefore run isolated deployments with diffe
 ```powershell
 python -m venv .venv
 . .venv/Scripts/Activate.ps1
-python -m pip install -e .
+python -m pip install -e ".[slack-socket,test]"
 $env:TASK_CORE_PATH = "C:\path\to\llm-wiki"
 python -X utf8 -m pytest -q
 ```
+
+The `[slack-socket,test]` extras pull the Socket Mode WebSocket client plus `pytest` and task-core's import-time deps (`PyYAML`, `pdfminer.six`), so the full suite — including the `task_core_bridge` integration tests — runs after a single install. (Use `pip install -e ".[slack-socket]"` alone for a runtime-only deployment that won't run the tests.)
 
 `task-core` remains external. For local development, keep `TASK_CORE_PATH` pointed at a checked-out task-core repo. Do not copy task-core into this repository.
 
