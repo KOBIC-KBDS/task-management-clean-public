@@ -62,3 +62,19 @@ Those child processes are per-message workers, not the durable service identity.
 If the Python process is killed while the LaunchAgent is loaded, `launchd`
 restarts it. To intentionally stop it, unload the LaunchAgent with `bootout`
 instead of killing only the PID.
+
+## Troubleshooting
+
+- Socket Mode connect fails with `WinError 10054` / connection reset: the
+  `apps.connections.open` WebSocket handshake is intermittently blocked by a
+  firewall/proxy. Restart the loop; it usually reconnects. If HTTP paths
+  (`slack-doctor --live-open-dm`, `slack-fast-cycle`) stay healthy, it is a
+  network/WSS issue, not a token or config problem.
+- Slow semantic replies: prefer `TASK_MANAGEMENT_CLAUDE_MODEL=sonnet`; `opus`
+  is noticeably slower for this interactive DM loop.
+- The socket loop shows up as two `python` processes (a launcher and the real
+  interpreter, parent/child). That is one instance, not a duplicate — check the
+  parent/child PIDs before terminating.
+- Read receipts: receiving a message adds an `eyes` reaction and completion adds
+  `white_check_mark`; this needs the `reactions:write` bot scope and is
+  best-effort (missing scope only skips the reactions, not the reply).

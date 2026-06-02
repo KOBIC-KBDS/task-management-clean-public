@@ -249,6 +249,15 @@ Then browse to <http://127.0.0.1:8787/dashboard.html>.
   `agent.decision.created` or `agent.fallback.used` event.
 - Korean text is garbled: use UTF-8 files/scripts (`python -X utf8`,
   `--text-file`) and avoid piping Korean text through PowerShell native stdin.
+- Socket Mode connect is refused or dropped (`WinError 10054` / connection
+  reset): the `apps.connections.open` WebSocket handshake can be intermittently
+  blocked by a corporate firewall/proxy. Restart the loop; it usually
+  reconnects. If `slack-doctor --live-open-dm` (HTTP) passes, treat it as a
+  network/WSS issue, not a token or config problem.
+- Semantic responses are slow: prefer `TASK_MANAGEMENT_CLAUDE_MODEL=sonnet`;
+  `opus` is noticeably slower for this interactive DM loop.
+- The socket loop shows up as two `python` processes (launcher + real
+  interpreter, parent/child) — that is one instance, not a duplicate.
 
 ## Official references
 
