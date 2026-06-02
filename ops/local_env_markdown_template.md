@@ -16,6 +16,7 @@ therefore override inherited shell variables and also override blank values from
 | TASK_MANAGEMENT_SLACK_ACTOR_ID | me | Local actor label. |
 | TASK_MANAGEMENT_INSTANCE_ID | clean-demo | Unique name for this machine/deployment. |
 | TASK_MANAGEMENT_ALLOWED_INSTANCE_ID | clean-demo | Must match instance id to allow live sends. |
+| TASK_MANAGEMENT_DASHBOARD_URL | http://127.0.0.1:8787/dashboard.html | Home tab dashboard link. REQUIRED for the App Home tab to refresh: slack-socket-loop / slack-fast-cycle publish the Home view only when this is set (empty value silently skips Home publish). |
 
 ## Semantic backend
 

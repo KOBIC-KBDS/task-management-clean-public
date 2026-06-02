@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Management — Slack App 설정 가이드</title>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue:          #2563eb;
+      --blue-light:    #dbeafe;
+      --blue-dark:     #1d4ed8;
+      --yellow:        #f59e0b;
+      --yellow-bg:     #fffbeb;
+      --yellow-border: #fcd34d;
+      --green:         #16a34a;
+      --green-bg:      #f0fdf4;
+      --green-border:  #86efac;
+      --red:           #dc2626;
+      --red-light:     #fee2e2;
+      --gray-50:       #f8f9fc;
+      --gray-100:      #f1f3f7;
+      --gray-200:      #e5e7eb;
+      --gray-400:      #9ca3af;
+      --gray-500:      #6b7280;
+      --gray-700:      #374151;
+      --gray-900:      #111827;
+      --radius:        10px;
+      --shadow:        0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+      --shadow-sm:     0 1px 2px rgba(0,0,0,.06);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Nanum Gothic', system-ui, -apple-system, sans-serif;
+      font-size: 16px;
+      line-height: 1.75;
+      color: var(--gray-700);
+      background: var(--gray-50);
+      padding: 2rem 1rem 6rem;
+    }
+
+    /* ── Layout ── */
+    .page-wrapper { max-width: 800px; margin: 0 auto; }
+
+    /* ── Header ── */
+    .page-header {
+      text-align: center;
+      padding: 3rem 2rem 2.5rem;
+      margin-bottom: 2rem;
+      background: white;
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+    .page-header .badge {
+      display: inline-block;
+      background: var(--blue-light);
+      color: var(--blue);
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
+    }
+    .page-header h1 {
+      font-size: 1.875rem;
+      font-weight: 800;
+      color: var(--gray-900);
+      line-height: 1.3;
+      margin-bottom: 0.75rem;
+    }
+    .page-header p {
+      color: var(--gray-500);
+      font-size: 0.95rem;
+      max-width: 540px;
+      margin: 0 auto;
+    }
+    .page-header .meta {
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+      margin-top: 1.25rem;
+      flex-wrap: wrap;
+    }
+    .page-header .meta span { font-size: 0.85rem; color: var(--gray-500); }
+    .page-header .meta strong { color: var(--gray-700); }
+
+    /* ── Flow / summary ── */
+    .flow-section {
+      background: white;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.5rem 2rem;
+      margin-bottom: 2rem;
+    }
+    .flow-section h2 {
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--gray-500);
+      margin-bottom: 1rem;
+    }
+    .flow-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .flow-chip {
+      background: var(--blue-light);
+      color: var(--blue-dark);
+      border-radius: 999px;
+      padding: 0.3rem 0.85rem;
+    }
+    .flow-chip.green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+    .flow-arrow { color: var(--gray-400); font-weight: 800; }
+
+    /* ── Section groups & cards ── */
+    .section-group { margin-bottom: 2rem; }
+    .section-group-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1.25rem 1.75rem;
+      border-radius: var(--radius) var(--radius) 0 0;
+      color: white;
+      font-size: 1.25rem;
+      font-weight: 800;
+    }
+    .section-group-header.blue { background: var(--blue); }
+    .section-group-header .group-letter {
+      display: flex; align-items: center; justify-content: center;
+      width: 2.5rem; height: 2.5rem; min-width: 2.5rem;
+      background: rgba(255,255,255,0.25);
+      border-radius: 50%;
+      font-size: 1.1rem; font-weight: 900;
+    }
+    .section-group-desc {
+      background: white;
+      border-left: 3px solid var(--blue);
+      border-right: 1px solid var(--gray-200);
+      border-bottom: 1px solid var(--gray-200);
+      padding: 1rem 1.75rem;
+      font-size: 0.92rem;
+      color: var(--gray-700);
+    }
+
+    .section {
+      background: white;
+      border-left: 3px solid var(--blue);
+      border-right: 1px solid var(--gray-200);
+      border-bottom: 1px solid var(--gray-200);
+      padding: 2rem 2.25rem;
+    }
+    .section:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+    .section-standalone {
+      background: white;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 2rem 2.25rem;
+      margin-bottom: 1.75rem;
+    }
+
+    .section-heading { display: flex; align-items: center; gap: 0.875rem; margin-bottom: 1.25rem; }
+    .section-num {
+      display: flex; align-items: center; justify-content: center;
+      width: 2.25rem; height: 2.25rem; min-width: 2.25rem;
+      background: var(--blue); color: white;
+      font-size: 0.9rem; font-weight: 800; border-radius: 50%;
+    }
+    .section-heading h2 { font-size: 1.2rem; font-weight: 700; color: var(--gray-900); }
+    .section-loc {
+      font-size: 0.8rem; color: var(--gray-500); font-weight: 600;
+      margin: -0.5rem 0 1rem 3.125rem;
+    }
+    .section-loc code {
+      background: var(--gray-100); color: var(--gray-700);
+      padding: 0.1em 0.4em; border-radius: 4px;
+      font-family: 'Consolas', 'Courier New', monospace; font-size: 0.85em;
+    }
+
+    h3 {
+      font-size: 1rem; font-weight: 700; color: var(--gray-900);
+      margin: 1.75rem 0 0.75rem;
+      padding-bottom: 0.4rem; border-bottom: 2px solid var(--gray-100);
+    }
+    h3:first-of-type { margin-top: 0.5rem; }
+
+    /* ── Step list ── */
+    .steps { display: flex; flex-direction: column; gap: 0.9rem; }
+    .step { display: flex; gap: 0.875rem; align-items: flex-start; }
+    .step-num {
+      display: flex; align-items: center; justify-content: center;
+      width: 1.75rem; height: 1.75rem; min-width: 1.75rem;
+      background: var(--blue-light); color: var(--blue);
+      font-size: 0.8rem; font-weight: 800; border-radius: 50%;
+      margin-top: 0.15rem;
+    }
+    .step-body { flex: 1; }
+    .step-body p { margin: 0; }
+
+    /* ── Code blocks ── */
+    .code-wrap { position: relative; margin: 0.6rem 0; }
+    pre.code-dark {
+      background: var(--gray-900); color: #e5e7eb;
+      padding: 1rem 1.25rem; border-radius: 8px;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 0.875rem; line-height: 1.6;
+      overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+    }
+    .inline-code {
+      background: var(--gray-100); color: var(--red);
+      padding: 0.1em 0.4em; border-radius: 4px;
+      font-family: 'Consolas', 'Courier New', monospace; font-size: 0.875em;
+    }
+    .copy-btn {
+      position: absolute; top: 0.5rem; right: 0.5rem;
+      background: rgba(255,255,255,0.1); color: #d1d5db;
+      border: 1px solid rgba(255,255,255,0.15); border-radius: 5px;
+      padding: 0.25rem 0.6rem; font-size: 0.75rem; cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.2); color: white; }
+    .copy-btn.copied { background: #16a34a; color: white; border-color: #16a34a; }
+
+    /* ── Screenshots ── */
+    .screenshot {
+      max-width: 100%;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      margin: 12px 0; display: block;
+    }
+    .screenshot-placeholder {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 0.5rem;
+      background: #f9fafb; border: 2px dashed #cbd5e1; border-radius: 8px;
+      padding: 1.75rem 1rem; margin: 12px 0;
+      color: var(--gray-500); font-size: 0.875rem; text-align: center;
+    }
+    .screenshot-placeholder .ph-icon { font-size: 1.75rem; }
+    .screenshot-placeholder .ph-label { font-weight: 700; color: var(--gray-700); }
+    .screenshot-placeholder .ph-path {
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 0.8rem; color: var(--blue-dark);
+      background: var(--blue-light); padding: 0.2rem 0.55rem; border-radius: 5px;
+    }
+
+    /* ── Value badge (얻는 값) ── */
+    .value-box {
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      background: var(--green-bg); border: 1px solid var(--green-border);
+      border-radius: 8px; padding: 0.85rem 1.1rem; margin: 0.85rem 0;
+    }
+    .value-box .v-key {
+      font-family: 'Consolas', 'Courier New', monospace; font-weight: 700;
+      color: var(--green); font-size: 0.9rem;
+    }
+    .value-box .v-desc { font-size: 0.85rem; color: var(--gray-700); }
+
+    /* ── Callouts ── */
+    .callout { border-radius: 8px; padding: 0.875rem 1.1rem; margin: 0.75rem 0; font-size: 0.9rem; line-height: 1.65; }
+    .callout-warn { background: var(--yellow-bg); border-left: 4px solid var(--yellow); }
+    .callout-tip  { background: var(--green-bg);  border-left: 4px solid var(--green); }
+    .callout-info { background: var(--blue-light); border-left: 4px solid var(--blue); }
+    .callout-title { font-weight: 700; margin-bottom: 0.2rem; }
+
+    /* ── Tables ── */
+    table.spec-table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.88rem; }
+    table.spec-table th, table.spec-table td { border: 1px solid var(--gray-200); padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
+    table.spec-table th { background: var(--gray-100); font-weight: 700; color: var(--gray-700); }
+    table.spec-table code {
+      background: var(--gray-100); color: var(--red);
+      padding: 0.1em 0.4em; border-radius: 4px;
+      font-family: 'Consolas', 'Courier New', monospace; font-size: 0.85em;
+    }
+
+    /* ── Checklist ── */
+    .checklist { list-style: none; padding: 0; margin: 0.5rem 0; }
+    .checklist li {
+      padding: 0.35rem 0 0.35rem 1.9rem; position: relative;
+      font-size: 0.9rem; color: var(--gray-700);
+    }
+    .checklist li::before {
+      content: '☐'; position: absolute; left: 0.3rem; top: 0.3rem;
+      color: var(--blue); font-size: 1rem;
+    }
+
+    /* ── Success banner ── */
+    .success-banner {
+      background: var(--green-bg); border: 2px solid var(--green-border);
+      border-radius: 10px; padding: 1.1rem 1.4rem; margin: 1.5rem 0 0;
+      display: flex; align-items: flex-start; gap: 0.75rem;
+      font-size: 0.95rem; line-height: 1.65;
+    }
+    .success-banner .sb-icon { font-size: 1.4rem; margin-top: 0.05rem; }
+    .success-banner .sb-title { font-weight: 800; color: var(--green); font-size: 1rem; margin-bottom: 0.2rem; }
+
+    /* ── FAQ ── */
+    .faq-item { border: 1px solid var(--gray-200); border-radius: 8px; margin-bottom: 0.6rem; overflow: hidden; }
+    .faq-item summary {
+      cursor: pointer; padding: 1rem 1.25rem; font-weight: 600; font-size: 0.95rem;
+      color: var(--gray-900); list-style: none;
+      display: flex; justify-content: space-between; align-items: center;
+      user-select: none; background: white; transition: background 0.15s;
+    }
+    .faq-item summary:hover { background: var(--gray-50); }
+    .faq-item summary::after { content: '+'; font-size: 1.25rem; color: var(--blue); font-weight: 400; transition: transform 0.2s; }
+    .faq-item[open] summary::after { content: '\2212'; }
+    .faq-item[open] summary { border-bottom: 1px solid var(--gray-200); }
+    .faq-body { padding: 1rem 1.25rem; font-size: 0.9rem; background: white; }
+    .faq-body code {
+      background: var(--gray-100); color: var(--red);
+      padding: 0.1em 0.4em; border-radius: 4px;
+      font-family: 'Consolas', 'Courier New', monospace; font-size: 0.85em;
+    }
+
+    /* ── Footer ── */
+    .page-footer { text-align: center; padding: 1.5rem; color: var(--gray-500); font-size: 0.85rem; }
+    .page-footer a { color: var(--blue); }
+
+    /* ── Print ── */
+    @media print {
+      body { background: white; padding: 0; }
+      .section, .section-standalone { box-shadow: none; border: 1px solid var(--gray-200); break-inside: avoid; }
+      .page-header { box-shadow: none; border: 1px solid var(--gray-200); }
+      .copy-btn { display: none; }
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrapper">
+
+  <!-- ── Header ── -->
+  <header class="page-header">
+    <span class="badge">Task Management 설정 가이드</span>
+    <h1>Slack App 설정 가이드</h1>
+    <p>새 Slack workspace에 task-management용 Slack app을 만들고 토큰을 발급받아 로컬에 연결하는 과정을, 화면 캡처와 함께 한 단계씩 안내합니다.</p>
+    <div class="meta">
+      <span><strong>목표 구성:</strong> Socket Mode + App Home DM</span>
+      <span><strong>소요:</strong> 약 15분</span>
+      <span><strong>최종 산출물:</strong> 토큰·ID 4개</span>
+    </div>
+  </header>
+
+  <!-- ── Flow summary ── -->
+  <div class="flow-section">
+    <h2>전체 흐름</h2>
+    <div class="flow-row">
+      <span class="flow-chip">Slack App 생성</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-chip">토큰·Scope·이벤트 설정</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-chip">값 4개 확보</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-chip">.env.local.md 입력</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-chip green">doctor 검증 ✅</span>
+    </div>
+  </div>
+
+  <!-- ── 목표 / 산출물 ── -->
+  <div class="section-standalone">
+    <div class="section-heading">
+      <div class="section-num">★</div>
+      <h2>먼저 — 최종적으로 모을 값 4개</h2>
+    </div>
+    <p>아래 4개를 모으는 것이 이 가이드의 목표입니다. 설정이 끝나면 <code class="inline-code">.env.local.md</code>에 입력합니다.</p>
+    <div class="value-box"><span class="v-key">SLACK_APP_TOKEN</span><span class="v-desc"><code class="inline-code">xapp-</code> 로 시작 — 2단계(App-Level Token) 캡처에서 확보</span></div>
+    <div class="value-box"><span class="v-key">SLACK_BOT_TOKEN</span><span class="v-desc"><code class="inline-code">xoxb-</code> 로 시작 — 6단계(Install) 캡처에서 확보</span></div>
+    <div class="value-box"><span class="v-key">SLACK_USER_ID</span><span class="v-desc"><code class="inline-code">U…</code>/<code class="inline-code">W…</code> — Slack 프로필 → Copy member ID (캡처 아님)</span></div>
+    <div class="value-box"><span class="v-key">SLACK_DM_CHANNEL_ID</span><span class="v-desc"><code class="inline-code">D…</code> — 처음엔 비워두고 <code class="inline-code">slack-doctor --live-open-dm</code>이 자동 resolve</span></div>
+    <div class="callout callout-warn">
+      <div class="callout-title">⚠️ 토큰이 보이는 캡처 주의</div>
+      2단계(App-Level Token)·6단계(Bot Token) 화면 캡처에는 실제 토큰이 찍힙니다. 가이드/저장소에 넣을 땐 <strong>토큰 부분을 가린 캡처</strong>를 쓰고, 토큰 값은 절대 git·문서·채팅에 붙여넣지 마세요. 노출 시 Slack에서 즉시 rotate/reinstall 하세요.
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- 설정 단계                                       -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div class="section-group" id="setup">
+    <div class="section-group-header blue">
+      <div class="group-letter">⚙</div>
+      <span>Slack App 설정 단계</span>
+    </div>
+    <div class="section-group-desc">
+      권장 시작점은 <strong>Socket Mode + App Home DM</strong>입니다. 외부 HTTPS URL 없이 로컬 노드에서 WebSocket으로 Slack 이벤트를 받습니다. 채널 감시는 DM 데모가 안정화된 뒤 켜는 선택 기능입니다.
+    </div>
+
+    <!-- 1. App 생성 -->
+    <div class="section" id="s1">
+      <div class="section-heading"><div class="section-num">1</div><h2>Slack App 생성</h2></div>
+      <div class="section-loc">위치: <code>https://api.slack.com/apps</code></div>
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><p><strong>Create New App</strong> → <strong>From scratch</strong>를 선택합니다.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><p>앱 이름(예: <code class="inline-code">Task Management Demo</code>)을 정하고 설치할 workspace를 선택합니다.</p></div></div>
+      </div>
+      <img class="screenshot" src="screenshots/slack-app-settings/00-create-app.png" alt="Slack App 생성 화면" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/00-create-app.png</span>
+      </div>
+      <div class="callout callout-tip"><div class="callout-title">✅ 체크포인트</div>좌측 메뉴에 Basic Information / App Home / OAuth &amp; Permissions / Socket Mode / Event Subscriptions가 보이면 성공입니다.</div>
+    </div>
+
+    <!-- 2. App-Level Token (3 sub-steps) -->
+    <div class="section" id="s2">
+      <div class="section-heading"><div class="section-num">2</div><h2>App-Level Token 생성</h2></div>
+      <div class="section-loc">위치: <code>Settings &gt; Basic Information</code> → 맨 아래 App-Level Tokens</div>
+
+      <h3>2-1. App-Level Tokens → Generate Token and Scopes</h3>
+      <p>Basic Information 페이지를 아래로 내려 <strong>App-Level Tokens</strong> 섹션에서 <strong>Generate Token and Scopes</strong>를 누릅니다.</p>
+      <img class="screenshot" src="screenshots/slack-app-settings/01-app-token-1-generate.png" alt="Basic Information의 App-Level Tokens 섹션" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/01-app-token-1-generate.png</span>
+      </div>
+
+      <h3>2-2. 토큰 이름 + <code class="inline-code">connections:write</code> scope 추가</h3>
+      <p>토큰 이름(예: <code class="inline-code">task-management-socket</code>)을 입력하고, <strong>Add Scope</strong>로 <code class="inline-code">connections:write</code>를 추가한 뒤 <strong>Generate</strong>를 누릅니다.</p>
+      <img class="screenshot" src="screenshots/slack-app-settings/01-app-token-2-scope.png" alt="connections:write scope 추가 모달" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/01-app-token-2-scope.png</span>
+      </div>
+
+      <h3>2-3. 토큰 복사 (<code class="inline-code">xapp-</code>)</h3>
+      <p>생성된 토큰을 <strong>Copy</strong>로 복사합니다. <code class="inline-code">xapp-</code> 로 시작하며, 이 값이 <code class="inline-code">SLACK_APP_TOKEN</code>입니다.</p>
+      <img class="screenshot" src="screenshots/slack-app-settings/01-app-token-3-copy.png" alt="App-Level Token 복사 화면 (토큰 가림)" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리 (토큰 부분 가리기)</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/01-app-token-3-copy.png</span>
+      </div>
+
+      <div class="value-box"><span class="v-key">SLACK_APP_TOKEN</span><span class="v-desc">2-3에서 복사한 <code class="inline-code">xapp-…</code> 토큰</span></div>
+    </div>
+
+    <!-- 3. Socket Mode -->
+    <div class="section" id="s3">
+      <div class="section-heading"><div class="section-num">3</div><h2>Socket Mode 활성화</h2></div>
+      <div class="section-loc">위치: <code>Settings &gt; Socket Mode</code></div>
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><p><strong>Enable Socket Mode</strong>를 켭니다.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><p>토큰을 요구하면 2단계에서 만든 <code class="inline-code">connections:write</code> 토큰을 사용하고 저장합니다.</p></div></div>
+      </div>
+      <img class="screenshot" src="screenshots/slack-app-settings/02-socket-mode.png" alt="Socket Mode 활성화 화면" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/02-socket-mode.png</span>
+      </div>
+      <div class="callout callout-info"><div class="callout-title">ℹ️ 참고</div>Socket Mode가 켜져 있으면 Event Subscriptions에서 Request URL(외부 HTTPS)을 넣지 않아도 됩니다.</div>
+    </div>
+
+    <!-- 4. OAuth Scopes (must precede App Home) -->
+    <div class="section" id="s4">
+      <div class="section-heading"><div class="section-num">4</div><h2>OAuth &amp; Permissions — Bot Scope</h2></div>
+      <div class="section-loc">위치: <code>Features &gt; OAuth &amp; Permissions</code> → Bot Token Scopes</div>
+      <div class="callout callout-info"><div class="callout-title">ℹ️ App Home보다 먼저</div>다음 단계(App Home)의 Home/Messages 탭은 <strong>bot scope가 정의돼 있어야</strong> 켤 수 있습니다. 그래서 scope를 먼저 추가합니다.</div>
+      <p>DM 중심 데모에 필요한 필수 bot scope:</p>
+      <table class="spec-table">
+        <thead><tr><th>Scope</th><th>이유</th></tr></thead>
+        <tbody>
+          <tr><td><code>chat:write</code></td><td>DM·확인·브리핑 메시지를 보냅니다.</td></tr>
+          <tr><td><code>im:history</code></td><td>app DM의 <code>message.im</code> 이벤트와 DM history를 읽습니다.</td></tr>
+          <tr><td><code>im:write</code></td><td>사용자와 app 사이 DM channel을 엽니다.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout callout-tip"><div class="callout-title">✅ clean repo 기준</div>이 3개는 코드의 <code class="inline-code">SLACK_PERSONAL_DM_BOT_SCOPES</code>로 고정돼 있고, <code class="inline-code">slack-doctor</code>가 <code class="inline-code">required_bot_scopes</code>로 자동 검증합니다. DM 데모는 더도 덜도 없이 이 3개면 충분합니다.</div>
+      <div class="callout callout-warn"><div class="callout-title">⚠️ User Token Scopes는 비워두기</div>같은 페이지의 <strong>User Token Scopes</strong> 섹션은 <strong>추가하지 않습니다</strong>. 이 어댑터는 bot token(<code class="inline-code">xoxb-</code>)만 사용하며, user token(<code class="inline-code">xoxp-</code>)을 넣으면 <code class="inline-code">slack-doctor</code>가 <em>"must be a bot token"</em>으로 거부합니다. <code class="inline-code">SLACK_USER_ID</code>는 토큰이 아니라 DM 상대(사람)를 식별하는 ID입니다.</div>
+      <img class="screenshot" src="screenshots/slack-app-settings/03-oauth-required-scopes.png" alt="OAuth 필수 Scope 화면" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/03-oauth-required-scopes.png</span>
+      </div>
+      <div class="callout callout-info"><div class="callout-title">ℹ️ 채널 감시는 선택</div>채널 triage를 할 때만 <code>app_mentions:read</code> / <code>channels:history</code> / <code>groups:history</code>를 추가합니다. 처음엔 DM path만 검증하세요.</div>
+    </div>
+
+    <!-- 5. App Home (after bot scope is defined) -->
+    <div class="section" id="s5">
+      <div class="section-heading"><div class="section-num">5</div><h2>App Home — Home/Messages 탭</h2></div>
+      <div class="section-loc">위치: <code>Features &gt; App Home</code></div>
+      <div class="callout callout-info"><div class="callout-title">ℹ️ 4단계가 선행</div>이 탭들은 <strong>4단계에서 bot scope를 정의한 뒤</strong>에 켤 수 있습니다. scope가 없으면 Slack이 먼저 scope 추가(review scopes to add)를 요구합니다.</div>
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><p><strong>Home Tab</strong>과 <strong>Messages Tab</strong>을 켭니다.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><p>"사용자가 app에 메시지를 보낼 수 있도록" 허용 옵션이 있으면 켭니다.</p></div></div>
+      </div>
+      <img class="screenshot" src="screenshots/slack-app-settings/04-app-home-tabs.png" alt="App Home 탭 설정 화면" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/04-app-home-tabs.png</span>
+      </div>
+    </div>
+
+    <!-- 6. Install (2 sub-steps) -->
+    <div class="section" id="s6">
+      <div class="section-heading"><div class="section-num">6</div><h2>Install to Workspace — Bot Token</h2></div>
+      <div class="section-loc">위치: <code>Settings &gt; Install App</code> (scope 변경 후엔 Reinstall)</div>
+
+      <h3>6-1. 워크스페이스에 설치</h3>
+      <p><strong>Install App</strong> → <strong>Install to (워크스페이스)</strong> 버튼을 누르고 권한 화면에서 scope를 확인합니다.</p>
+      <img class="screenshot" src="screenshots/slack-app-settings/05-install-1-button.png" alt="Install to Workspace 버튼 화면" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/05-install-1-button.png</span>
+      </div>
+
+      <h3>6-2. Bot User OAuth Token 복사 (<code class="inline-code">xoxb-</code>)</h3>
+      <p>설치 후 <strong>Bot User OAuth Token</strong>을 복사합니다. <code class="inline-code">xoxb-</code> 로 시작하며, 이 값이 <code class="inline-code">SLACK_BOT_TOKEN</code>입니다.</p>
+      <img class="screenshot" src="screenshots/slack-app-settings/05-install-2-token.png" alt="설치 후 Bot Token 화면 (토큰 가림)" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리 (토큰 부분 가리기)</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/05-install-2-token.png</span>
+      </div>
+
+      <div class="value-box"><span class="v-key">SLACK_BOT_TOKEN</span><span class="v-desc">6-2에서 복사한 <code class="inline-code">xoxb-…</code> 토큰</span></div>
+      <div class="callout callout-warn"><div class="callout-title">⚠️ scope를 바꾼 뒤엔</div>반드시 Reinstall 하고, 토큰이 바뀌었으면 <code class="inline-code">.env.local</code>을 갱신하세요.</div>
+    </div>
+
+    <!-- 7. Event Subscriptions -->
+    <div class="section" id="s7">
+      <div class="section-heading"><div class="section-num">7</div><h2>Event Subscriptions</h2></div>
+      <div class="section-loc">위치: <code>Features &gt; Event Subscriptions</code></div>
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><p><strong>Enable Events</strong>를 켭니다. (Socket Mode이므로 Request URL은 비워둬도 됩니다.)</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><p><strong>Subscribe to bot events</strong>에 아래 이벤트를 추가합니다.</p></div></div>
+      </div>
+      <table class="spec-table">
+        <thead><tr><th>Event</th><th>목적</th></tr></thead>
+        <tbody>
+          <tr><td><code>message.im</code></td><td>app DM 메시지를 수신합니다. (필수)</td></tr>
+          <tr><td><code>app_home_opened</code></td><td>Home tab을 열 때 dashboard view를 갱신합니다.</td></tr>
+        </tbody>
+      </table>
+      <img class="screenshot" src="screenshots/slack-app-settings/06-event-subscriptions-dm.png" alt="Event Subscriptions 화면" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/06-event-subscriptions-dm.png</span>
+      </div>
+      <div class="callout callout-warn"><div class="callout-title">⚠️ 이벤트 추가 후</div>Slack이 요구하면 app을 reinstall 해야 이벤트가 들어옵니다.</div>
+    </div>
+
+    <!-- 8. Slack client 확인 -->
+    <div class="section" id="s8">
+      <div class="section-heading"><div class="section-num">8</div><h2>Slack 클라이언트에서 확인</h2></div>
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><p>Slack에서 새 app을 열고 <strong>Messages</strong> 탭에서 테스트 메시지를 보냅니다.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><p><strong>Home</strong> 탭을 열어 초기 dashboard/안내가 보이는지 확인합니다.</p></div></div>
+      </div>
+      <div class="code-wrap">
+        <pre class="code-dark">내일 오전 10시까지 데모 준비 체크리스트 정리해줘</pre>
+        <button class="copy-btn" onclick="copyCode(this)">복사</button>
+      </div>
+      <img class="screenshot" src="screenshots/slack-app-settings/08-slack-client-app-home.png" alt="Slack 클라이언트 App Home 화면" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="screenshot-placeholder" style="display:none;">
+        <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+        <span class="ph-path">docs/screenshots/slack-app-settings/08-slack-client-app-home.png</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── User ID & DM Channel ID 확보 ── -->
+  <div class="section-standalone">
+    <div class="section-heading"><div class="section-num">＋</div><h2>User ID &amp; DM Channel ID 확보</h2></div>
+
+    <h3>SLACK_USER_ID — 본인 멤버 ID (<code class="inline-code">U…</code>/<code class="inline-code">W…</code>)</h3>
+    <p>Slack에서 본인 프로필을 열고 <strong>⋮ → 멤버 ID 복사</strong>를 누릅니다.</p>
+    <img class="screenshot" src="screenshots/slack-app-settings/09-slack-user-id.png" alt="프로필에서 멤버 ID 복사" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+    <div class="screenshot-placeholder" style="display:none;">
+      <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+      <span class="ph-path">docs/screenshots/slack-app-settings/09-slack-user-id.png</span>
+    </div>
+
+    <h3>SLACK_DM_CHANNEL_ID — 봇과의 1:1 DM 채널 (<code class="inline-code">D…</code>)</h3>
+    <div class="callout callout-warn"><div class="callout-title">⚠️ 공개/비공개 채널이 아닙니다</div>여기 필요한 건 <strong>나와 봇(Task Management) 사이의 DM 채널 ID</strong>로 <code class="inline-code">D</code>로 시작합니다. 공개 채널(<code class="inline-code">C…</code>)이나 비공개 채널(<code class="inline-code">G…</code>)의 ID가 <strong>아닙니다</strong>.</div>
+    <div class="callout callout-tip"><div class="callout-title">✅ 가장 쉬운 방법 — 직접 안 찾아도 됨</div><code class="inline-code">SLACK_USER_ID</code>만 채워 두고 doctor를 돌리면 DM 채널이 자동으로 잡힙니다. 출력의 <code class="inline-code">dm_resolution</code>에 나온 <code class="inline-code">D…</code> 값을 <code class="inline-code">SLACK_DM_CHANNEL_ID</code>에 고정하거나, 비워둔 채 매번 자동 resolve 하게 둬도 됩니다.</div>
+    <div class="code-wrap"><pre class="code-dark">python -X utf8 -m task_management.cli --state .task-management-demo slack-doctor --live-open-dm</pre><button class="copy-btn" onclick="copyCode(this)">복사</button></div>
+    <p>수동으로 찾으려면 Slack에서 <strong>봇(Task Management)과의 DM</strong>을 열고 채널 정보에서 <code class="inline-code">D…</code> 채널 ID를 확인합니다. — <code class="inline-code">#소셜</code> 채널 정보에서 <code class="inline-code">C…</code>를 보신 것과 같은 위치이지만, 대상이 <strong>봇과의 DM</strong>이어야 합니다.</p>
+    <img class="screenshot" src="screenshots/slack-app-settings/10-slack-dm-channel-id.png" alt="봇 DM의 채널 ID (D...) 확인" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+    <div class="screenshot-placeholder" style="display:none;">
+      <span class="ph-icon">📸</span><span class="ph-label">캡처 자리</span>
+      <span class="ph-path">docs/screenshots/slack-app-settings/10-slack-dm-channel-id.png</span>
+    </div>
+    <div class="callout callout-warn"><div class="callout-title">⚠️ 캡처 속 ID 노출 주의</div>이 화면에는 실제 채널 ID(<code class="inline-code">D…</code>)와 봇 멤버 ID(<code class="inline-code">U…</code>)가 보입니다. 토큰만큼 치명적이지는 않지만, 공개 저장소에 올릴 때는 가리는 것이 안전합니다.</div>
+  </div>
+
+  <!-- ── 검증 ── -->
+  <div class="section-standalone">
+    <div class="section-heading"><div class="section-num">✓</div><h2>설정 검증 — 로컬 doctor</h2></div>
+    <p>repo 루트에서 아래를 실행합니다. CLI가 <code class="inline-code">.env.local</code>과 <code class="inline-code">.env.local.md</code>를 자동 로드합니다.</p>
+
+    <h3>1) 로컬 설정 파일 만들기</h3>
+    <div class="code-wrap">
+      <pre class="code-dark">Copy-Item .env.example .env.local
+Copy-Item ops/local_env_markdown_template.md .env.local.md</pre>
+      <button class="copy-btn" onclick="copyCode(this)">복사</button>
+    </div>
+    <p><code class="inline-code">.env.local.md</code>에 위 4개 값을 입력합니다. 인스턴스 가드는 두 값을 동일하게 두면 어디서든 동작합니다:</p>
+    <div class="code-wrap">
+      <pre class="code-dark">SLACK_BOT_TOKEN=
+SLACK_APP_TOKEN=
+SLACK_USER_ID=
+SLACK_DM_CHANNEL_ID=
+TASK_MANAGEMENT_INSTANCE_ID=clean-demo
+TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo</pre>
+      <button class="copy-btn" onclick="copyCode(this)">복사</button>
+    </div>
+
+    <h3>2) DM / Web API 설정 확인</h3>
+    <div class="code-wrap">
+      <pre class="code-dark">python -X utf8 -m task_management.cli --state .task-management-demo slack-doctor --live-open-dm</pre>
+      <button class="copy-btn" onclick="copyCode(this)">복사</button>
+    </div>
+
+    <h3>3) Socket Mode 설정 확인</h3>
+    <div class="code-wrap">
+      <pre class="code-dark">python -X utf8 -m task_management.cli --state .task-management-demo slack-socket-doctor</pre>
+      <button class="copy-btn" onclick="copyCode(this)">복사</button>
+    </div>
+
+    <div class="success-banner">
+      <span class="sb-icon">🎉</span>
+      <div>
+        <div class="sb-title">두 doctor가 모두 통과하면 준비 완료</div>
+        이후 <code class="inline-code">slack-fast-cycle</code> 또는 <code class="inline-code">slack-socket-loop</code>에 <code class="inline-code">--send</code>를 붙여 라이브로 실행할 수 있습니다.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 최종 체크리스트 ── -->
+  <div class="section-standalone">
+    <div class="section-heading"><div class="section-num">☑</div><h2>최종 체크리스트</h2></div>
+    <ul class="checklist">
+      <li>App-Level Token이 있고 <code class="inline-code">connections:write</code> scope를 가진다.</li>
+      <li><code class="inline-code">SLACK_APP_TOKEN</code>이 <code class="inline-code">xapp-</code>로 시작한다.</li>
+      <li>Socket Mode가 enabled 상태다.</li>
+      <li>Bot Token Scopes에 <code class="inline-code">chat:write</code>, <code class="inline-code">im:history</code>, <code class="inline-code">im:write</code>가 있다.</li>
+      <li>Event Subscriptions에 <code class="inline-code">message.im</code>이 있다. (Home tab이면 <code class="inline-code">app_home_opened</code>도)</li>
+      <li>App Home에서 Messages tab이 켜져 있다.</li>
+      <li>app을 install/reinstall 했다.</li>
+      <li><code class="inline-code">SLACK_BOT_TOKEN</code>이 <code class="inline-code">xoxb-</code>로 시작한다.</li>
+      <li><code class="inline-code">SLACK_USER_ID</code>가 본인 id(<code class="inline-code">U…</code>/<code class="inline-code">W…</code>)다.</li>
+      <li><code class="inline-code">slack-doctor --live-open-dm</code>과 <code class="inline-code">slack-socket-doctor</code>가 성공한다.</li>
+      <li>토큰·DB·JSONL·Slack transcript를 git에 넣지 않았다.</li>
+    </ul>
+  </div>
+
+  <!-- ── FAQ / Troubleshooting ── -->
+  <div class="section-standalone">
+    <div class="section-heading"><div class="section-num">?</div><h2>Troubleshooting</h2></div>
+
+    <details class="faq-item">
+      <summary><code>SLACK_APP_TOKEN is required</code></summary>
+      <div class="faq-body">App-Level Token을 만들고 <code>.env.local</code>에 <code>SLACK_APP_TOKEN=xapp-…</code>를 넣었는지 확인합니다.</div>
+    </details>
+    <details class="faq-item">
+      <summary><code>SLACK_BOT_TOKEN must be a bot token</code></summary>
+      <div class="faq-body">OAuth &amp; Permissions의 <strong>Bot User OAuth Token</strong>(<code>xoxb-</code>)을 복사했는지 확인합니다. user token이 아닙니다.</div>
+    </details>
+    <details class="faq-item">
+      <summary>Socket Mode는 연결되는데 DM이 안 들어옴</summary>
+      <div class="faq-body">Event Subscriptions에 <code>message.im</code>이 있고, 추가 후 app을 reinstall했는지 확인합니다.</div>
+    </details>
+    <details class="faq-item">
+      <summary>app에 DM을 보낼 수 없음</summary>
+      <div class="faq-body">App Home의 Messages tab / "사용자가 메시지 보내기 허용" 설정을 켰는지 확인합니다.</div>
+    </details>
+    <details class="faq-item">
+      <summary><code>conversations.open</code>이 DM을 못 찾음</summary>
+      <div class="faq-body"><code>SLACK_USER_ID</code>를 본인 <code>U…</code> id로 설정하거나, <code>SLACK_DM_CHANNEL_ID=D…</code>를 직접 지정합니다.</div>
+    </details>
+    <details class="faq-item">
+      <summary>토큰을 실수로 문서·채팅에 붙여넣음</summary>
+      <div class="faq-body">즉시 Slack app에서 토큰을 rotate/reinstall하고, 붙여넣은 문서·히스토리에서 제거합니다.</div>
+    </details>
+  </div>
+
+  <!-- ── Footer ── -->
+  <footer class="page-footer">
+    원본 체크리스트: <code>ops/slack_app_settings_guide.md</code> · 신규 운영자 가이드: <code>ops/slack_bot_connection_guide.md</code><br>
+    캡처는 <code>docs/screenshots/slack-app-settings/</code>에 파일명에 맞춰 넣으면 위 자리표시자가 자동으로 이미지로 바뀝니다.
+  </footer>
+
+</div>
+
+<script>
+  function copyCode(btn) {
+    var pre = btn.parentElement.querySelector('pre');
+    if (!pre) return;
+    var text = pre.innerText;
+    navigator.clipboard.writeText(text).then(function () {
+      btn.textContent = '복사됨';
+      btn.classList.add('copied');
+      setTimeout(function () { btn.textContent = '복사'; btn.classList.remove('copied'); }, 1500);
+    });
+  }
+</script>
+</body>
+</html>
