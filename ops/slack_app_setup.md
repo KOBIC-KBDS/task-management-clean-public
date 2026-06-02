@@ -31,6 +31,7 @@ placeholders, see [`slack_app_settings_guide.md`](slack_app_settings_guide.md).
 - `chat:write`
 - `im:history`
 - `im:write`
+- `reactions:write`
 
 ## Socket Mode
 

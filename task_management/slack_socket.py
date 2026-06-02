@@ -81,7 +81,7 @@ def diagnose_slack_socket_config(config: SlackSocketConfig) -> SlackSocketConfig
         "Generate an app-level token with connections:write and set SLACK_APP_TOKEN.",
         "Enable Event Subscriptions and subscribe the bot to message.im and app_home_opened.",
         "Optional allowlisted notification triage: subscribe to app_mention or message.channels/message.groups/message.im as needed, invite the bot to watched channels, and set TASK_MANAGEMENT_SLACK_WATCH_CHANNEL_IDS.",
-        "Keep the personal DM bot scopes available: chat:write, im:history, im:write.",
+        "Keep the personal DM bot scopes available: chat:write, im:history, im:write, reactions:write.",
         "Enable App Home > Home Tab if the Slack Home tab should show task summaries.",
         "Run slack-socket-loop only for the configured personal D... DM channel.",
     ]
@@ -519,9 +519,14 @@ def handle_slack_socket_envelope(
         )
 
     store.append_event("slack.message.polled", {"message_id": message.message_id}, occurred_at=message.received_at)
+    ts = message.message_id.rsplit("/", 1)[-1]
+    if send:
+        try:  # best-effort read receipt; never block processing on a reaction failure
+            adapter.add_reaction(message.chat_id, ts, "eyes")
+        except Exception:
+            pass
     result = orchestrator.handle_message(message)
     outbound = result.outbound_messages
-    ts = message.message_id.rsplit("/", 1)[-1]
     if message.chat_id == expected_channel_id:
         latest_ts = store.get_integration_state(_last_ts_key(adapter.config.actor_id)) or adapter.oldest
         if not latest_ts or float(ts) > float(latest_ts):
@@ -531,6 +536,12 @@ def handle_slack_socket_envelope(
     if send and outbound:
         queue_slack_outbound(store, adapter, tuple(outbound), queued_at=handled_at)
         drain_slack_outbound_queue(store, adapter, sent_at=handled_at)
+    if send:
+        try:  # mark done: eyes -> white_check_mark, best-effort
+            adapter.remove_reaction(message.chat_id, ts, "eyes")
+            adapter.add_reaction(message.chat_id, ts, "white_check_mark")
+        except Exception:
+            pass
 
     dashboard_output.parent.mkdir(parents=True, exist_ok=True)
     dashboard_model = build_web_task_page_model(store, today=handled_at.date())

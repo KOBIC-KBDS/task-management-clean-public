@@ -143,6 +143,7 @@ DM 중심 demo path에 필요한 bot scope:
 | `chat:write` | Slack DM/confirmation/briefing 메시지를 보냅니다. |
 | `im:history` | app DM의 `message.im` 이벤트와 DM history를 읽습니다. |
 | `im:write` | 사용자와 app 사이의 DM channel을 열 수 있습니다. |
+| `reactions:write` | 받은 메시지에 읽음(👀)·완료(✅) 리액션을 답니다. |
 
 > Screenshot placeholder: `docs/screenshots/slack-app-settings/04-oauth-required-scopes.png`
 
@@ -281,7 +282,7 @@ python -X utf8 -m task_management.cli --agent "$TASK_MANAGEMENT_OPERATING_AGENT"
 - [ ] App-Level Token이 있고 `connections:write` scope를 가진다.
 - [ ] `SLACK_APP_TOKEN`이 `xapp-`로 시작한다.
 - [ ] Socket Mode가 enabled 상태다.
-- [ ] Bot Token Scopes에 `chat:write`, `im:history`, `im:write`가 있다.
+- [ ] Bot Token Scopes에 `chat:write`, `im:history`, `im:write`, `reactions:write`가 있다.
 - [ ] Event Subscriptions에 `message.im`이 있다.
 - [ ] Home tab을 쓸 경우 `app_home_opened`가 있다.
 - [ ] App Home에서 Messages tab이 켜져 있다.

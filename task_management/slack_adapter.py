@@ -17,7 +17,7 @@ class SlackAdapterError(RuntimeError):
     """Raised for local Slack adapter configuration/API failures."""
 
 
-SLACK_PERSONAL_DM_BOT_SCOPES = ("chat:write", "im:history", "im:write")
+SLACK_PERSONAL_DM_BOT_SCOPES = ("chat:write", "im:history", "im:write", "reactions:write")
 
 
 @dataclass(frozen=True)
@@ -84,7 +84,7 @@ def diagnose_slack_live_config(config: SlackDmConfig) -> SlackLiveConfigCheck:
     warnings: list[str] = []
     setup_steps = [
         "Create/install a Slack app with a bot user.",
-        "Grant bot scopes: chat:write, im:history, im:write.",
+        "Grant bot scopes: chat:write, im:history, im:write, reactions:write.",
         "Set SLACK_BOT_TOKEN to the installed xoxb- bot token.",
         "Set SLACK_DM_CHANNEL_ID to a D... personal DM id, or set SLACK_USER_ID so conversations.open can resolve one.",
         "Set SLACK_USER_ID and enable App Home if you want the Home tab to show the task page summary.",
@@ -163,6 +163,12 @@ class SlackWebClient(Protocol):
     def publish_home_view(self, user_id: str, view: Mapping[str, Any]) -> str:
         """Publish a Slack App Home view for one user and return the view id/hash."""
 
+    def add_reaction(self, channel_id: str, ts: str, name: str) -> None:
+        """Add an emoji reaction to a message by conversation id + ts."""
+
+    def remove_reaction(self, channel_id: str, ts: str, name: str) -> None:
+        """Remove an emoji reaction from a message by conversation id + ts."""
+
 
 class SlackHttpClient:
     """Tiny stdlib Slack Web API client kept behind the adapter boundary."""
@@ -208,6 +214,24 @@ class SlackHttpClient:
             return str(published.get("id") or published.get("hash") or "")
         return ""
 
+    def add_reaction(self, channel_id: str, ts: str, name: str) -> None:
+        payload = self._post_json_unchecked(
+            "https://slack.com/api/reactions.add",
+            {"channel": channel_id, "timestamp": ts, "name": name},
+        )
+        if payload.get("ok") or payload.get("error") == "already_reacted":
+            return
+        raise SlackAdapterError(str(payload.get("error") or payload))
+
+    def remove_reaction(self, channel_id: str, ts: str, name: str) -> None:
+        payload = self._post_json_unchecked(
+            "https://slack.com/api/reactions.remove",
+            {"channel": channel_id, "timestamp": ts, "name": name},
+        )
+        if payload.get("ok") or payload.get("error") in {"no_reaction", "message_not_found"}:
+            return
+        raise SlackAdapterError(str(payload.get("error") or payload))
+
     def _get_json(self, url: str) -> dict[str, Any]:
         req = urlrequest.Request(url, headers={"Authorization": f"Bearer {self.token}"})
         with urlrequest.urlopen(req, timeout=20) as response:  # nosec - explicit live CLI path only
@@ -243,6 +267,8 @@ class FakeSlackWebClient:
     sent: list[tuple[str, str, str]] = field(default_factory=list)
     deleted: list[tuple[str, str]] = field(default_factory=list)
     home_views: list[tuple[str, Mapping[str, Any], str]] = field(default_factory=list)
+    reactions_added: list[tuple[str, str, str]] = field(default_factory=list)
+    reactions_removed: list[tuple[str, str, str]] = field(default_factory=list)
 
     def open_dm(self, user_id: str) -> str:
         return self.channel_id
@@ -265,6 +291,12 @@ class FakeSlackWebClient:
         view_id = f"VHOME{len(self.home_views) + 1:06d}"
         self.home_views.append((user_id, view, view_id))
         return view_id
+
+    def add_reaction(self, channel_id: str, ts: str, name: str) -> None:
+        self.reactions_added.append((channel_id, ts, name))
+
+    def remove_reaction(self, channel_id: str, ts: str, name: str) -> None:
+        self.reactions_removed.append((channel_id, ts, name))
 
 
 class SlackDmAdapter:
@@ -327,6 +359,12 @@ class SlackDmAdapter:
                 f"Slack App Home publish is restricted to configured user {self.config.user_id!r}; got {user_id!r}."
             )
         return self.client.publish_home_view(user_id, view)
+
+    def add_reaction(self, channel_id: str, ts: str, name: str) -> None:
+        self.client.add_reaction(channel_id, ts, name)
+
+    def remove_reaction(self, channel_id: str, ts: str, name: str) -> None:
+        self.client.remove_reaction(channel_id, ts, name)
 
 
 def slack_message_to_incoming(

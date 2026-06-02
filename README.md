@@ -84,6 +84,7 @@ Required bot scopes for DM mode:
 - `chat:write`
 - `im:history`
 - `im:write`
+- `reactions:write`
 
 Socket Mode additionally needs an app-level token (`xapp-...`) and subscribed events such as `message.im`.
 

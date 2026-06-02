@@ -470,9 +470,10 @@
           <tr><td><code>chat:write</code></td><td>DM·확인·브리핑 메시지를 보냅니다.</td></tr>
           <tr><td><code>im:history</code></td><td>app DM의 <code>message.im</code> 이벤트와 DM history를 읽습니다.</td></tr>
           <tr><td><code>im:write</code></td><td>사용자와 app 사이 DM channel을 엽니다.</td></tr>
+          <tr><td><code>reactions:write</code></td><td>받은 메시지에 읽음(👀)·완료(✅) 리액션을 답니다.</td></tr>
         </tbody>
       </table>
-      <div class="callout callout-tip"><div class="callout-title">✅ clean repo 기준</div>이 3개는 코드의 <code class="inline-code">SLACK_PERSONAL_DM_BOT_SCOPES</code>로 고정돼 있고, <code class="inline-code">slack-doctor</code>가 <code class="inline-code">required_bot_scopes</code>로 자동 검증합니다. DM 데모는 더도 덜도 없이 이 3개면 충분합니다.</div>
+      <div class="callout callout-tip"><div class="callout-title">✅ clean repo 기준</div>이 4개는 코드의 <code class="inline-code">SLACK_PERSONAL_DM_BOT_SCOPES</code>로 고정돼 있고, <code class="inline-code">slack-doctor</code>가 <code class="inline-code">required_bot_scopes</code>로 자동 검증합니다. (<code class="inline-code">reactions:write</code>는 받은 메시지에 읽음·완료 리액션을 달기 위해 필요합니다.)</div>
       <div class="callout callout-warn"><div class="callout-title">⚠️ User Token Scopes는 비워두기</div>같은 페이지의 <strong>User Token Scopes</strong> 섹션은 <strong>추가하지 않습니다</strong>. 이 어댑터는 bot token(<code class="inline-code">xoxb-</code>)만 사용하며, user token(<code class="inline-code">xoxp-</code>)을 넣으면 <code class="inline-code">slack-doctor</code>가 <em>"must be a bot token"</em>으로 거부합니다. <code class="inline-code">SLACK_USER_ID</code>는 토큰이 아니라 DM 상대(사람)를 식별하는 ID입니다.</div>
       <img class="screenshot" src="screenshots/slack-app-settings/03-oauth-required-scopes.png" alt="OAuth 필수 Scope 화면" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
       <div class="screenshot-placeholder" style="display:none;">
@@ -640,7 +641,7 @@ TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo</pre>
       <li>App-Level Token이 있고 <code class="inline-code">connections:write</code> scope를 가진다.</li>
       <li><code class="inline-code">SLACK_APP_TOKEN</code>이 <code class="inline-code">xapp-</code>로 시작한다.</li>
       <li>Socket Mode가 enabled 상태다.</li>
-      <li>Bot Token Scopes에 <code class="inline-code">chat:write</code>, <code class="inline-code">im:history</code>, <code class="inline-code">im:write</code>가 있다.</li>
+      <li>Bot Token Scopes에 <code class="inline-code">chat:write</code>, <code class="inline-code">im:history</code>, <code class="inline-code">im:write</code>, <code class="inline-code">reactions:write</code>가 있다.</li>
       <li>Event Subscriptions에 <code class="inline-code">message.im</code>이 있다. (Home tab이면 <code class="inline-code">app_home_opened</code>도)</li>
       <li>App Home에서 Messages tab이 켜져 있다.</li>
       <li>app을 install/reinstall 했다.</li>

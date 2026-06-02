@@ -428,7 +428,7 @@ def test_slack_live_config_doctor_accepts_private_dm_bot_setup_without_leaking_t
     assert check.can_send is True
     assert check.token_kind == "bot"
     assert check.dm_resolution == "SLACK_DM_CHANNEL_ID"
-    assert set(check.required_bot_scopes) == {"chat:write", "im:history", "im:write"}
+    assert set(check.required_bot_scopes) == {"chat:write", "im:history", "im:write", "reactions:write"}
     assert "xoxb-test" not in repr(check)
 
 

@@ -15,6 +15,7 @@ from task_management.slack_socket import (
     SlackSocketConfig,
     diagnose_slack_socket_config,
     enqueue_slack_socket_envelope,
+    handle_slack_socket_envelope,
     process_slack_socket_inbound_queue,
     run_slack_socket_loop,
     slack_socket_envelope_to_incoming,
@@ -141,6 +142,32 @@ def test_socket_config_requires_app_level_token_without_leaking_value() -> None:
     assert ready.required_app_scopes == ("connections:write",)
     assert ready.watched_channel_ids == ()
     assert ready.watch_requires_mention is True
+
+
+def test_socket_handle_marks_eyes_then_check_reactions(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = FakeSlackWebClient(channel_id="DTEST")
+    adapter = SlackDmAdapter(
+        SlackDmConfig(actor_id="me", dm_channel_id="DTEST", bot_token="xoxb-test"), client
+    )
+    orchestrator = TeamTaskOrchestrator(store)
+
+    handle_slack_socket_envelope(
+        store=store,
+        orchestrator=orchestrator,
+        adapter=adapter,
+        envelope=_message_im_envelope(),
+        dashboard_output=tmp_path / "dashboard.html",
+        send=True,
+        handled_at=datetime(2026, 5, 5, 10, 0, 0),
+    )
+
+    added = [name for _c, _ts, name in client.reactions_added]
+    removed = [name for _c, _ts, name in client.reactions_removed]
+    assert "eyes" in added
+    assert "white_check_mark" in added
+    assert "eyes" in removed
+    assert ("DTEST", "1779167000.000001", "white_check_mark") in client.reactions_added
 
 
 def test_socket_message_im_envelope_converts_to_incoming_message() -> None:

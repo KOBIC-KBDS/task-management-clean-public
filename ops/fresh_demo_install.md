@@ -156,6 +156,7 @@ In the target Slack workspace:
    - `chat:write`
    - `im:history`
    - `im:write`
+   - `reactions:write`
 3. Enable App Home / direct messages if the workspace UI requires it.
 4. Install or reinstall the app to the workspace.
 5. Copy the bot token (`xoxb-...`) into local environment only.

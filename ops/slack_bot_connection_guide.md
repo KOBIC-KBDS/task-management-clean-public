@@ -105,6 +105,7 @@ persistence, approvals, Slack sends, and task-core preview validation.
    - `chat:write`
    - `im:history`
    - `im:write`
+   - `reactions:write`
 4. Install or reinstall the app to the workspace after changing scopes.
 5. Copy the bot token (`xoxb-...`) to your local environment only.
 

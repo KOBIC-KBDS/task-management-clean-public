@@ -392,7 +392,7 @@ def test_cli_slack_doctor_reports_ready_env_without_token_leak(tmp_path: Path, m
     assert result["can_poll"] is True
     assert result["can_send"] is True
     assert result["token_kind"] == "bot"
-    assert result["required_bot_scopes"] == ["chat:write", "im:history", "im:write"]
+    assert result["required_bot_scopes"] == ["chat:write", "im:history", "im:write", "reactions:write"]
     assert result["live_open_dm"] == {"attempted": False}
     assert result["safety"]["slack_scope"] == "personal_dm_only"
     assert "xoxb-test" not in json.dumps(result)
