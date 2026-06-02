@@ -64,6 +64,16 @@ def build_operating_agent_context(
                 "feedback patches from Slack notification messages. The core will require user confirmation before "
                 "any notification-derived proposal is approved."
             ),
+            "no_action_policy": (
+                "DM and channel differ by nature. A private DM (visibility=private) is the user speaking directly "
+                "to the bot, so it must never be silently dropped: always emit create_proposals when there is a "
+                "task/event/routine/commitment, otherwise set clarification_questions to confirm intent — including "
+                "whether a casually phrased self-plan (하하 ... 저녁 먹을거야), a time, or an activity should be tracked. "
+                "Reserve no_action in a DM for a pure greeting/acknowledgement only; when unsure, ask rather than "
+                "stay silent. A team-channel message (visibility=team), by contrast, may not target the bot or user "
+                "at all, so letting it pass with no_action is acceptable there, subject to slack_notification_policy "
+                "(mention-required / allowlist)."
+            ),
             "date_fields": "Use ISO YYYY-MM-DD or empty string. Do not invent exact dates when a window is ambiguous.",
             "approval_policy": "Do not mark approved in agent output; core decides approval requests and statuses.",
             "time_policy": "For broad time hints like 점심/오전/오후/저녁, keep the broad hint and set needs_exact_time when exact time is required.",
