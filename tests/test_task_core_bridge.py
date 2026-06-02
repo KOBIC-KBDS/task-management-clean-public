@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from task_management.discussion_adapter import parse_manual_discussion
+from task_management.domain import TeamTaskTaskCandidate
 from task_management.task_core_bridge import build_task_management_task_export, validate_with_task_core
 
 
@@ -87,6 +88,40 @@ def test_date_window_metadata_matches_task_core_r023_contract(tmp_path: Path) ->
     assert preview["issues"] == []
     convention = preview["accepted_metadata_conventions"]["date_window"]
     assert convention["policy"] == "metadata-first; top-level mirrors are accepted for transition but not required"
+    assert convention["item_count"] == 1
+    assert convention["needs_exact_date_count"] == 1
+    assert convention["missing_slots"] == ["exact_date"]
+
+
+def test_builtin_preview_fallback_runs_without_external_task_core(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TASK_MANAGEMENT_TASK_CORE_MODE", "builtin")
+    candidate = TeamTaskTaskCandidate(
+        source_key="manual/fallback/1",
+        raw_text="Review the demo checklist",
+        title="Review the demo checklist",
+        discussion_id="manual/fallback",
+        message_id="manual/fallback/1",
+        line_number=1,
+        assigned_to="me",
+        task_management_area="work",
+        due_date=date(2026, 6, 5),
+        metadata={
+            "date_window_start": "2026-06-03",
+            "date_window_end": "2026-06-05",
+            "needs_exact_date": "true",
+        },
+    )
+
+    payload = build_task_management_task_export([candidate], exported_at=datetime(2026, 6, 2, 9, 0, 0))
+    preview = validate_with_task_core(payload, root=tmp_path)
+
+    assert preview["ok"] is True
+    assert preview["restores"] is False
+    assert preview["mutates_files"] is False
+    assert preview["backend"] == "task-management-builtin-preview"
+    assert preview["would_create"] == 1
+    assert preview["would_update"] == 0
+    convention = preview["accepted_metadata_conventions"]["date_window"]
     assert convention["item_count"] == 1
     assert convention["needs_exact_date_count"] == 1
     assert convention["missing_slots"] == ["exact_date"]

@@ -9,13 +9,14 @@ Slack is only the front door. The task-management system itself is:
 
 - this repository's Python runtime,
 - one local state directory (`--state ...`) with SQLite + JSONL audit logs,
-- `task-core` referenced externally through `TASK_CORE_PATH`,
+- preview-only task-core export validation, using either an external
+  `TASK_CORE_PATH` checkout or the built-in preview fallback,
 - and the semantic operating agent, either Codex CLI or Claude Code CLI using
   the operator's local login session.
 
 Therefore each person or team can run the same clean source code with their own
-Slack app, Slack tokens, state directory, task-core checkout, and semantic CLI
-login.
+Slack app, Slack tokens, state directory, optional task-core checkout, and
+semantic CLI login.
 Do not share tokens or state unless you intentionally want the same queue.
 
 For a step-by-step clean demo workspace setup, including empty database
@@ -30,7 +31,7 @@ For a screen-by-screen Slack app settings checklist, see
 - One semantic CLI installed and authenticated:
   - Codex CLI with `codex login`, or
   - Claude Code CLI with its interactive login flow
-- A local checkout of task-core
+- Optional: a local checkout of task-core for strict integration validation
 - Permission to create/install a private Slack app in the target workspace
 
 No OpenAI/Anthropic API key is needed for the login-session paths. The project
@@ -44,14 +45,27 @@ cd task-management
 
 python -m venv .venv
 . .venv/Scripts/Activate.ps1
-python -m pip install -e .
+python -m pip install -e ".[slack-socket,test]"
 ```
 
-Point the project at task-core:
+For a self-contained clean demo with no task-core checkout, force the built-in
+preview fallback:
 
 ```powershell
-$env:TASK_CORE_PATH = "C:\path\to\llm-wiki"
+$env:TASK_MANAGEMENT_TASK_CORE_MODE = "builtin"
 ```
+
+For strict task-core validation instead, point the project at task-core and
+require external mode:
+
+```powershell
+$env:TASK_CORE_PATH = "C:\path\to\task-core"
+$env:TASK_MANAGEMENT_TASK_CORE_MODE = "external"
+```
+
+The default mode is `auto`: use external task-core when importable and otherwise
+fall back to the local preview shim. The fallback only validates preview payloads
+and never writes task-core inbox/raw/wiki files.
 
 Verify the clean checkout:
 

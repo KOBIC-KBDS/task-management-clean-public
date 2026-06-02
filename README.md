@@ -34,7 +34,8 @@ The owner is this project runtime:
 That means each private deployment can attach its own Slack app/bot account to the same clean repository:
 
 1. Clone this repository.
-2. Point `TASK_CORE_PATH` at that user's checked-out task-core repo.
+2. Use the built-in task-core preview fallback, or point `TASK_CORE_PATH` at
+   that user's checked-out task-core repo for stricter integration validation.
 3. Log in locally to the chosen semantic CLI (`codex login` or interactive
    `claude` login). No OpenAI/Anthropic API key is required for the login-session
    modes.
@@ -60,13 +61,24 @@ Different teams or individuals may therefore run isolated deployments with diffe
 python -m venv .venv
 . .venv/Scripts/Activate.ps1
 python -m pip install -e ".[slack-socket,test]"
-$env:TASK_CORE_PATH = "C:\path\to\llm-wiki"
 python -X utf8 -m pytest -q
 ```
 
-The `[slack-socket,test]` extras pull the Socket Mode WebSocket client plus `pytest` and task-core's import-time deps (`PyYAML`, `pdfminer.six`), so the full suite — including the `task_core_bridge` integration tests — runs after a single install. (Use `pip install -e ".[slack-socket]"` alone for a runtime-only deployment that won't run the tests.)
+The `[slack-socket,test]` extras pull the Socket Mode WebSocket client plus
+`pytest` and optional task-core import-time deps (`PyYAML`, `pdfminer.six`), so
+the full suite runs after a single install. If no external task-core checkout is
+importable, the `task_core_bridge` tests use the built-in preview fallback. (Use
+`pip install -e ".[slack-socket]"` alone for a runtime-only deployment that won't
+run the tests.)
 
-`task-core` remains external. For local development, keep `TASK_CORE_PATH` pointed at a checked-out task-core repo. Do not copy task-core into this repository.
+`task-core` remains external. Do not copy task-core into this repository. The
+default `TASK_MANAGEMENT_TASK_CORE_MODE=auto` tries an external task-core import
+first and then uses this repository's built-in preview fallback if the checkout
+is missing. The fallback validates the `task-core.export.v1` payload shape and
+never writes task-core inbox/raw/wiki files. For strict integration testing, set
+`TASK_CORE_PATH` to a checked-out task-core repo and set
+`TASK_MANAGEMENT_TASK_CORE_MODE=external`; for a deliberately self-contained
+demo, set `TASK_MANAGEMENT_TASK_CORE_MODE=builtin`.
 
 ## Slack configuration
 
@@ -106,6 +118,7 @@ SLACK_BOT_TOKEN=
 SLACK_APP_TOKEN=
 SLACK_USER_ID=
 SLACK_DM_CHANNEL_ID=
+TASK_MANAGEMENT_TASK_CORE_MODE=auto
 TASK_MANAGEMENT_INSTANCE_ID=clean-demo
 TASK_MANAGEMENT_ALLOWED_INSTANCE_ID=clean-demo
 ```

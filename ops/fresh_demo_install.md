@@ -57,7 +57,7 @@ git clone https://github.com/YOUR_ORG/task-management.git
 cd task-management
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e ".[slack-socket,test]"
 python -X utf8 -m pytest -q
 ```
 
@@ -68,26 +68,55 @@ git clone https://github.com/YOUR_ORG/task-management.git
 cd task-management
 python -m venv .venv
 . .venv/Scripts/Activate.ps1
-python -m pip install -e .
+python -m pip install -e ".[slack-socket,test]"
 python -X utf8 -m pytest -q
 ```
 
-## 2. Connect task-core externally
+## 2. Choose task-core preview mode
 
-Do not copy task-core into this repository. Point the environment at an existing
-task-core checkout:
+Do not copy task-core into this repository. A clean checkout can run in two
+preview modes:
+
+- `auto` (default): use an external task-core checkout when importable, otherwise
+  use the built-in preview fallback.
+- `builtin`: force the built-in preview fallback for a self-contained demo.
+- `external`: require a real task-core checkout and fail if it is missing.
+
+For a quick clean demo with no task-core checkout:
+
+macOS / Linux:
+
+```bash
+export TASK_MANAGEMENT_TASK_CORE_MODE=builtin
+```
+
+Windows PowerShell:
+
+```powershell
+$env:TASK_MANAGEMENT_TASK_CORE_MODE = "builtin"
+```
+
+For stricter integration validation, point the environment at an existing
+task-core checkout and require external mode:
 
 macOS / Linux:
 
 ```bash
 export TASK_CORE_PATH=/path/to/task-core
+export TASK_MANAGEMENT_TASK_CORE_MODE=external
 ```
 
 Windows PowerShell:
 
 ```powershell
 $env:TASK_CORE_PATH = "C:\path\to\task-core"
+$env:TASK_MANAGEMENT_TASK_CORE_MODE = "external"
 ```
+
+If neither variable is set, the default `auto` mode falls back to the local
+preview shim when task-core is not importable. The shim validates preview payloads
+and reports `mutates_files=false`; it does not write task-core inbox/raw/wiki
+files.
 
 ## 3. Prepare a semantic backend
 

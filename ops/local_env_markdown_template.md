@@ -11,7 +11,8 @@ therefore override inherited shell variables and also override blank values from
 
 | Key | Value | Notes |
 | --- | --- | --- |
-| TASK_CORE_PATH |  | Path to your external task-core checkout, if used. |
+| TASK_CORE_PATH |  | Optional path to an external task-core checkout. Leave blank for the built-in preview fallback. |
+| TASK_MANAGEMENT_TASK_CORE_MODE | auto | `auto` uses external task-core when importable and falls back otherwise. Use `external` to fail if task-core is missing, or `builtin` for the local preview shim. |
 | TASK_MANAGEMENT_STATE | .task-management-demo | Use a new state directory per Slack app/workspace. |
 | TASK_MANAGEMENT_SLACK_ACTOR_ID | me | Local actor label. |
 | TASK_MANAGEMENT_INSTANCE_ID | clean-demo | Unique name for this machine/deployment. |

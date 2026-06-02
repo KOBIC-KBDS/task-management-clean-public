@@ -16,7 +16,8 @@ Because of that boundary, a new private deployment is just:
 
 1. clone this repository,
 2. log in to the chosen semantic CLI on the host that will operate it,
-3. point `TASK_CORE_PATH` to an external task-core checkout,
+3. use the built-in task-core preview fallback, or point `TASK_CORE_PATH` to an
+   external task-core checkout for strict integration validation,
 4. create/install a private Slack app,
 5. set that app's local tokens and DM/channel identifiers,
 6. run the Slack loop against an isolated `--state` directory.

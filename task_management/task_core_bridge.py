@@ -4,6 +4,7 @@ from datetime import datetime
 import hashlib
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import sys
 from typing import Any, Iterable
 
@@ -17,6 +18,11 @@ from .relations import (
 
 DEFAULT_TASK_CORE_PATH = Path.home() / "claudecode" / "llm-wiki"
 SYNC_MODEL = "task_management-preview-only-adapter"
+TASK_CORE_MODE_ENV = "TASK_MANAGEMENT_TASK_CORE_MODE"
+TASK_CORE_MODE_AUTO = "auto"
+TASK_CORE_MODE_EXTERNAL = "external"
+TASK_CORE_MODE_BUILTIN = "builtin"
+BUILTIN_PREVIEW_BACKEND = "task-management-builtin-preview"
 
 
 def build_task_management_task_export(
@@ -74,11 +80,17 @@ def validate_with_task_core(
     task_core_path: str | Path | None = None,
     root: str | Path | None = None,
 ) -> dict[str, Any]:
-    ensure_task_core_on_path(task_core_path)
-    from pipeline.adapters.task.server import task_import_preview_payload
-
     preview_root = root if root is not None else resolved_task_core_path(task_core_path)
-    return task_import_preview_payload(payload, root=preview_root)
+    task_core_mode = _task_core_mode()
+    if task_core_mode != TASK_CORE_MODE_BUILTIN:
+        try:
+            task_import_preview_payload = _load_external_preview(task_core_path)
+        except ImportError:
+            if task_core_mode == TASK_CORE_MODE_EXTERNAL:
+                raise
+        else:
+            return task_import_preview_payload(payload, root=preview_root)
+    return _builtin_task_import_preview_payload(payload, root=preview_root)
 
 
 def ensure_task_core_on_path(task_core_path: str | Path | None = None) -> Path:
@@ -201,13 +213,115 @@ def _skip_workflow_parent_by_default(proposal: Proposal, proposals: tuple[Propos
 
 
 def _project_capture(text: str) -> Any:
-    ensure_task_core_on_path()
+    task_core_mode = _task_core_mode()
+    if task_core_mode != TASK_CORE_MODE_BUILTIN:
+        try:
+            project_capture = _load_external_project_capture()
+        except ImportError:
+            if task_core_mode == TASK_CORE_MODE_EXTERNAL:
+                raise
+        else:
+            return project_capture(text)
+    return _builtin_project_capture(text)
+
+
+def _task_core_mode() -> str:
+    mode = os.environ.get(TASK_CORE_MODE_ENV, TASK_CORE_MODE_AUTO).strip().lower() or TASK_CORE_MODE_AUTO
+    if mode not in {TASK_CORE_MODE_AUTO, TASK_CORE_MODE_EXTERNAL, TASK_CORE_MODE_BUILTIN}:
+        raise ValueError(
+            f"{TASK_CORE_MODE_ENV} must be one of "
+            f"{TASK_CORE_MODE_AUTO!r}, {TASK_CORE_MODE_EXTERNAL!r}, or {TASK_CORE_MODE_BUILTIN!r}."
+        )
+    return mode
+
+
+def _load_external_preview(task_core_path: str | Path | None = None) -> Any:
+    ensure_task_core_on_path(task_core_path)
+    from pipeline.adapters.task.server import task_import_preview_payload
+
+    return task_import_preview_payload
+
+
+def _load_external_project_capture(task_core_path: str | Path | None = None) -> Any:
+    ensure_task_core_on_path(task_core_path)
     try:
         from pipeline.task_core import project_capture
-    except ImportError:
-        from pipeline.adapters.task.server import project_capture
+    except ImportError as primary_error:
+        try:
+            from pipeline.adapters.task.server import project_capture
+        except ImportError as secondary_error:
+            raise secondary_error from primary_error
+    return project_capture
 
-    return project_capture(text)
+
+def _builtin_project_capture(text: str) -> Any:
+    title = text.strip() or "Untitled task"
+    return SimpleNamespace(
+        title=title,
+        captured_date=None,
+        item_type="task",
+        disposition="execution",
+        missing_slots=[],
+    )
+
+
+def _builtin_task_import_preview_payload(payload: dict[str, Any], *, root: str | Path | None = None) -> dict[str, Any]:
+    items = list(payload.get("items", []))
+    issues: list[dict[str, Any]] = []
+    if payload.get("schema_version") != TASK_EXPORT_SCHEMA:
+        issues.append(
+            {
+                "code": "unsupported_schema_version",
+                "schema_version": payload.get("schema_version", ""),
+                "expected": TASK_EXPORT_SCHEMA,
+            }
+        )
+    for index, item in enumerate(items):
+        for key in ("id", "title", "metadata"):
+            if key not in item:
+                issues.append({"code": "missing_item_key", "index": index, "key": key})
+        if not isinstance(item.get("metadata", {}), dict):
+            issues.append({"code": "invalid_item_metadata", "index": index})
+
+    date_window_items = [
+        item
+        for item in items
+        if isinstance(item.get("metadata", {}), dict)
+        and (
+            item["metadata"].get("date_window_start")
+            or item["metadata"].get("date_window_end")
+            or item["metadata"].get("needs_exact_date") == "true"
+        )
+    ]
+    accepted_metadata_conventions: dict[str, Any] = {}
+    if date_window_items:
+        missing_slots = sorted(
+            {
+                slot
+                for item in date_window_items
+                for slot in item.get("missing_slots", [])
+            }
+        )
+        accepted_metadata_conventions["date_window"] = {
+            "policy": "metadata-first; top-level mirrors are accepted for transition but not required",
+            "item_count": len(date_window_items),
+            "needs_exact_date_count": sum(
+                1 for item in date_window_items if item["metadata"].get("needs_exact_date") == "true"
+            ),
+            "missing_slots": missing_slots,
+        }
+
+    return {
+        "ok": not issues,
+        "restores": False,
+        "mutates_files": False,
+        "backend": BUILTIN_PREVIEW_BACKEND,
+        "root": str(root) if root is not None else "",
+        "would_create": len(items),
+        "would_update": 0,
+        "issues": issues,
+        "accepted_metadata_conventions": accepted_metadata_conventions,
+    }
 
 
 def _board_for(candidate: TeamTaskTaskCandidate, *, task_status: str) -> str:
