@@ -14,6 +14,7 @@ from task_management.relations import (
     blocking_dependencies,
     child_proposals,
     relation_sort_key,
+    requires_separate_approval,
     validate_workflow_relations,
     workflow_projection,
 )
@@ -164,6 +165,70 @@ def test_workflow_batch_uses_group_approval_and_keeps_risky_child_separate(tmp_p
     assert store.get_proposal("proposal/workflow").status == "approved"  # type: ignore[union-attr]
     assert store.get_proposal("proposal/check").status == "approved"  # type: ignore[union-attr]
     assert store.get_proposal("proposal/send").status == "awaiting_approval"  # type: ignore[union-attr]
+
+
+def test_title_token_inspector_flags_outbound_but_not_internal_notice() -> None:
+    # Core inspector catches outbound-send / deploy / destructive titles even
+    # with no risk_* metadata, but leaves a bare internal "안내" alone.
+    assert requires_separate_approval(_proposal("p/mail", "정보실 메일 안내"))
+    assert requires_separate_approval(_proposal("p/deploy", "운영 배포"))
+    assert requires_separate_approval(_proposal("p/delete", "임시 데이터 삭제"))
+    assert not requires_separate_approval(_proposal("p/notice", "회의 안내"))
+    assert not requires_separate_approval(_proposal("p/plain", "데모 동작 테스트"))
+
+
+def test_workflow_batch_flags_risky_child_from_title_without_metadata(tmp_path: Path) -> None:
+    # The operating agent set NO risk metadata; the deterministic core must still
+    # keep the outbound mail step out of the grouped "한번에 등록" approval.
+    store = _store(tmp_path)
+    parent = _draft(
+        "proposal/workflow",
+        "Demo 마무리",
+        metadata={"workflow_role": "parent", "workflow_id": "demo", "workflow_title": "Demo 마무리"},
+    )
+    normal_child = _draft(
+        "proposal/test",
+        "데모 동작 테스트",
+        due_date=date(2026, 5, 29),
+        metadata={
+            "parent_proposal_id": "proposal/workflow",
+            "workflow_id": "demo",
+            "step_index": "1",
+            "step_count": "2",
+        },
+    )
+    risky_child = _draft(
+        "proposal/mail",
+        "정보실 메일 안내",
+        due_date=date(2026, 5, 29),
+        metadata={
+            "parent_proposal_id": "proposal/workflow",
+            "workflow_id": "demo",
+            "step_index": "2",
+            "step_count": "2",
+            "depends_on_proposal_ids": "proposal/test",
+        },
+    )
+
+    result = TeamTaskOrchestrator(
+        store, operating_agent=StaticDraftAgent((parent, normal_child, risky_child))
+    ).handle_message(_message("demo wrap-up workflow"))
+
+    assert result.outbound_messages[0].card["workflow_group_child_ids"] == "proposal/test"
+    assert result.outbound_messages[0].card["workflow_separate_child_ids"] == "proposal/mail"
+    assert len(result.approval_requests) == 2
+    group_request = next(r for r in result.approval_requests if r.proposal_id == "proposal/workflow")
+
+    accepted = TeamTaskOrchestrator(store).handle_approval(
+        request_id=group_request.request_id,
+        approver_id="me",
+        accepted=True,
+        decided_at=NOW.replace(hour=10),
+    )
+    assert {p.proposal_id for p in accepted.proposals} == {"proposal/workflow", "proposal/test"}
+    assert store.get_proposal("proposal/workflow").status == "approved"  # type: ignore[union-attr]
+    assert store.get_proposal("proposal/test").status == "approved"  # type: ignore[union-attr]
+    assert store.get_proposal("proposal/mail").status == "awaiting_approval"  # type: ignore[union-attr]
 
 
 def test_invalid_workflow_batch_saves_no_proposals(tmp_path: Path) -> None:

@@ -47,6 +47,23 @@ ALLOWED_RISK_REASONS = frozenset(
     }
 )
 
+# Deterministic safety net for the approval-ownership contract.
+# Even when the semantic operating agent forgets to flag a risky workflow step,
+# the core inspects the step title and treats outbound-send / destructive /
+# spending / credential actions as requiring separate approval, so they are
+# never bundled into a single grouped "한번에 등록" approval. This keeps approval
+# safety identical no matter which semantic backend (claude/codex/...) is plugged in.
+# Intentionally excludes broad words like "안내"/"공지" that are often internal;
+# concrete send verbs ("메일"/"발송"/...) already catch the outbound cases.
+SEPARATE_APPROVAL_RISK_TOKENS: tuple[str, ...] = (
+    "배포", "릴리즈", "릴리스",
+    "메일", "이메일", "발송", "전송", "송부",
+    "삭제", "제거", "폐기",
+    "결제", "구매", "환불", "송금", "이체",
+    "비밀번호", "암호", "토큰", "자격증명", "크리덴셜",
+    "deploy", "release", "mail", "delete", "payment", "credential", "password",
+)
+
 
 @dataclass(frozen=True)
 class RelationValidationError:
@@ -179,14 +196,27 @@ def step_label(proposal: Proposal) -> str:
     return ""
 
 
+def title_implies_separate_approval(proposal: Proposal) -> bool:
+    """Deterministic inspector: does the step title describe a risky action?
+
+    Lowercased so the English tokens match; Korean tokens match as-is. This is the
+    core enforcing the approval contract when the semantic agent under-flags a step.
+    """
+
+    title = (proposal.title or "").lower()
+    return any(token in title for token in SEPARATE_APPROVAL_RISK_TOKENS)
+
+
 def requires_separate_approval(proposal: Proposal) -> bool:
     if proposal.metadata.get(REQUIRES_SEPARATE_APPROVAL_KEY) == "true":
         return True
     risk_level = proposal.metadata.get(RISK_LEVEL_KEY, "").strip().lower()
     risk_reason = proposal.metadata.get(RISK_REASON_KEY, "").strip().lower()
-    return risk_level in {"medium", "high", "critical"} or (
+    if risk_level in {"medium", "high", "critical"} or (
         risk_reason not in ALLOWED_RISK_REASONS and bool(risk_reason)
-    )
+    ):
+        return True
+    return title_implies_separate_approval(proposal)
 
 
 def validate_workflow_relations(
