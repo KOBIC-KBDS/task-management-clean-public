@@ -2,7 +2,7 @@
 
 This document is the curated runtime map for the clean public task-management repository. It explains where a semantic CLI agent intervenes, where deterministic code takes over, and how the current workflow/hierarchy rules reshape tasks after the agent returns a decision.
 
-For a playable animation, open [`docs/agent-flow-demo/index.html`](agent-flow-demo/index.html). For a static code inventory, open [`docs/codeboarding/index.html`](codeboarding/index.html). This page is different: it is the operator-facing control-flow and policy map.
+For a rendered version of this document, open [`docs/agent-flow.html`](agent-flow.html). For a playable animation, open [`docs/agent-flow-demo/index.html`](agent-flow-demo/index.html). For static code inventory evidence, start at [`docs/codeboarding/README.md`](codeboarding/README.md). This page is different: it is the operator-facing control-flow and policy map.
 
 ## Current one-line model
 

@@ -7,6 +7,8 @@
 
 ## Start Here
 
+For how the semantic agent and deterministic runtime actually operate, read [`../agent-flow.md`](../agent-flow.md) first. CodeBoarding output is static inventory evidence, not the product flow narrative.
+
 1. Read `architecture.md` for the high-level inventory and overview diagram.
 2. Read `module-map.md` for package/module evidence and cheap import edges.
 3. Read `runtime-flow.md` for manifest/config entrypoints.
