@@ -1,0 +1,4071 @@
+{
+  "analysis_limits": {
+    "dependency_edges": {
+      "basis": "AST imports for Python and regex import/require detection for JavaScript/TypeScript.",
+      "confidence": "medium",
+      "known_gaps": [
+        "Dynamic imports and framework conventions may be incomplete.",
+        "First-party package detection is heuristic."
+      ]
+    },
+    "runtime_entrypoints": {
+      "basis": "Manifest/config entrypoints only; the target application is not executed.",
+      "confidence": "medium",
+      "known_gaps": [
+        "Framework routers, background jobs, and deployment-specific runtime behavior."
+      ]
+    },
+    "safety": {
+      "basis": "Path/name denylist plus symlink and target-root boundary checks.",
+      "confidence": "medium-high",
+      "known_gaps": [
+        "Content-based secret detection is intentionally not performed to avoid reading candidate secrets."
+      ]
+    },
+    "synthesis_contract": [
+      "Treat inventory fields as evidence only when citing concrete file paths.",
+      "Label architecture summaries that go beyond static facts as inference.",
+      "Preserve known_gaps in generated Markdown."
+    ]
+  },
+  "counts": {
+    "files_scanned": 120,
+    "languages": {
+      "HTML": 3,
+      "JSON": 4,
+      "Markdown": 17,
+      "Python": 77,
+      "Shell": 1,
+      "TOML": 1
+    },
+    "skipped_paths": 13,
+    "suffixes": {
+      ".html": 3,
+      ".json": 4,
+      ".md": 17,
+      ".png": 8,
+      ".py": 77,
+      ".sh": 1,
+      ".template": 2,
+      ".toml": 1,
+      ".txt": 5,
+      "[none]": 2
+    }
+  },
+  "dependency_edges": [
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "discussion_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "claude_code_operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "codex_operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "export_service"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "frontend"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "kakao_export_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "openai_operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "simulator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "slack_cycle"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "slack_digest"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "task_reconciler"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/__init__.py",
+      "target": "task_core_bridge"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/approval_policy.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/approval_policy.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/approval_policy.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/approval_policy.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/approval_policy.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/approval_policy.py",
+      "target": "human_view"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/approval_policy.py",
+      "target": "slot_validator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/approval_policy.py",
+      "target": "relations"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/attention.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/attention.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/attention.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/attention.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/attention.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/attention.py",
+      "target": "relations"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/backfill_report.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/backfill_report.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/backfill_report.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/backfill_report.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/backfill_report.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/backfill_report.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/backfill_report.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/chat_adapter.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/chat_adapter.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/chat_adapter.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "shutil"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "subprocess"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "operating_agent_prompt"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/claude_code_operating_agent.py",
+      "target": "semantic_context"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/cli.py",
+      "target": "argparse"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/cli.py",
+      "target": "asyncio"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/cli.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/cli.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/cli.py",
+      "target": "shutil"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/cli.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/cli.py",
+      "target": "time"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "backfill_report"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "claude_code_operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "codex_operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "export_service"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "frontend"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "kakao_export_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "openai_operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "reminders"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "secretary"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "simulator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_canvas"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_canvas_registry"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_correction"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_cycle"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_e2e"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_fast_cycle"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_page"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "slack_socket"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/cli.py",
+      "target": "workflow_normalizer"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "shutil"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "subprocess"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "tempfile"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "operating_agent_prompt"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/codex_operating_agent.py",
+      "target": "semantic_context"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/collaboration_context.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/collaboration_context.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/collaboration_context.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/collaboration_context.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/collaboration_context.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/collaboration_context.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/commands.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/commands.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/commands.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/commands.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/conflict_policy.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/conflict_policy.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/conflict_policy.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/conflict_policy.py",
+      "target": "approval_policy"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/conflict_policy.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/conflict_policy.py",
+      "target": "human_view"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/conflict_policy.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/deferred_policy.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/deferred_policy.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/discussion_adapter.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/discussion_adapter.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/discussion_adapter.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/discussion_adapter.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/discussion_adapter.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/discussion_adapter.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/domain.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/domain.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/domain.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/domain.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/export_service.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/export_service.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/export_service.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/export_service.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/export_service.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/export_service.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/export_service.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/export_service.py",
+      "target": "task_core_bridge"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "html"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "attention"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "human_view"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "relations"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "sort_keys"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "timeline"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/frontend.py",
+      "target": "work_item_state"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/human_view.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/human_view.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/human_view.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/human_view.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/human_view.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/human_view.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/kakao_export_adapter.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/kakao_export_adapter.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/kakao_export_adapter.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/kakao_export_adapter.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/kakao_export_adapter.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "urllib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/openai_operating_agent.py",
+      "target": "semantic_context"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/operating_agent.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/operating_agent.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/operating_agent.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/operating_agent.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/operating_agent.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/operating_agent.py",
+      "target": "discussion_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/operating_agent.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/operating_agent_prompt.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/orchestrator.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/orchestrator.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/orchestrator.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "commands"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "conflict_policy"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "deferred_policy"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "discussion_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "approval_policy"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "collaboration_context"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "proposal_builder"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "pending_info"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "relations"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "slot_validator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "sort_keys"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "task_reconciler"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/orchestrator.py",
+      "target": "workflow_normalizer"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/pending_info.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/pending_info.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/pending_info.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/pending_info.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/pending_info.py",
+      "target": "approval_policy"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/pending_info.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/pending_info.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/proposal_builder.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/proposal_builder.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/proposal_builder.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/proposal_builder.py",
+      "target": "slot_validator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/relations.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/relations.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/relations.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/relations.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/reminders.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/reminders.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/reminders.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/reminders.py",
+      "target": "human_view"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/reminders.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/semantic_context.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/semantic_context.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/semantic_context.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/semantic_context.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/semantic_context.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/semantic_context.py",
+      "target": "human_view"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/semantic_context.py",
+      "target": "operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/simulator.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/simulator.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/simulator.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/simulator.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/simulator.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/simulator.py",
+      "target": "operating_agent"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/simulator.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/simulator.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "urllib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_adapter.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_canvas.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_canvas.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_canvas.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_canvas.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_canvas.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_canvas.py",
+      "target": "urllib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_canvas_registry.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_canvas_registry.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_canvas_registry.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_canvas_registry.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_canvas_registry.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_correction.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_correction.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_correction.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_correction.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_correction.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_correction.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "frontend"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "slack_digest"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "slack_page"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_cycle.py",
+      "target": "task_reconciler"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_digest.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_digest.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_digest.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_digest.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_digest.py",
+      "target": "human_view"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_digest.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "shutil"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "sqlite3"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "time"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "urllib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "frontend"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_e2e.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_export_adapter.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "frontend"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "pending_info"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "slack_home"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_fast_cycle.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_home.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_home.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_home.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_home.py",
+      "target": "frontend"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_home.py",
+      "target": "human_view"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_home.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_home.py",
+      "target": "sort_keys"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_home.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_page.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_page.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_page.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_page.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_page.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_page.py",
+      "target": "human_view"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_page.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_socket.py",
+      "target": "asyncio"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_socket.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_socket.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_socket.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_socket.py",
+      "target": "time"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "urllib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "frontend"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "orchestrator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "slack_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "slack_home"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slack_socket.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slack_socket.py",
+      "target": "websockets"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slot_validator.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/slot_validator.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/slot_validator.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/sort_keys.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/sort_keys.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/sort_keys.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/sort_keys.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/store.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/store.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/store.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/store.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/store.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/store.py",
+      "target": "sqlite3"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/store.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/store.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "types"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "sys"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "relations"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_core_bridge.py",
+      "target": "pipeline"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "conflict_policy"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "deferred_policy"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "discussion_adapter"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "slot_validator"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/task_reconciler.py",
+      "target": "store"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/timeline.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/timeline.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/timeline.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/timeline.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/timeline.py",
+      "target": "relations"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/work_item_state.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/work_item_state.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/work_item_state.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/workflow_normalizer.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/workflow_normalizer.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/workflow_normalizer.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/workflow_normalizer.py",
+      "target": "hashlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "task_management/workflow_normalizer.py",
+      "target": "re"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/workflow_normalizer.py",
+      "target": "domain"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "task_management/workflow_normalizer.py",
+      "target": "relations"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_claude_code_operating_agent.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_claude_code_operating_agent.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_claude_code_operating_agent.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_claude_code_operating_agent.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_claude_code_operating_agent.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_claude_code_operating_agent.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_claude_code_operating_agent.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_codex_operating_agent.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_codex_operating_agent.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_codex_operating_agent.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_codex_operating_agent.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_codex_operating_agent.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_codex_operating_agent.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_codex_operating_agent.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_commands_export_cli.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_commands_export_cli.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_commands_export_cli.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_commands_export_cli.py",
+      "target": "os"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_commands_export_cli.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_commands_export_cli.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_commands_export_cli.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_discussion_adapter.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_discussion_adapter.py",
+      "target": "datetime"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_discussion_adapter.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_encoding_contract.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_encoding_contract.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_external_collaboration_context.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_external_collaboration_context.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_external_collaboration_context.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_external_collaboration_context.py",
+      "target": "typing"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_external_collaboration_context.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_feedback_routing.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_feedback_routing.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_feedback_routing.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_feedback_routing.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_feedback_routing.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_feedback_routing.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_frontend_surfaces.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_frontend_surfaces.py",
+      "target": "datetime"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_frontend_surfaces.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_hierarchy_subtasks.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_hierarchy_subtasks.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_hierarchy_subtasks.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_hierarchy_subtasks.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_hierarchy_subtasks.py",
+      "target": "typing"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_hierarchy_subtasks.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_human_view.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_human_view.py",
+      "target": "datetime"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_human_view.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_kakao_export_adapter.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_kakao_export_adapter.py",
+      "target": "datetime"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_kakao_export_adapter.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_openai_operating_agent.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_openai_operating_agent.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_openai_operating_agent.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_openai_operating_agent.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_openai_operating_agent.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_openai_operating_agent.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_openai_operating_agent.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_operating_agent.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_operating_agent.py",
+      "target": "copy"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_operating_agent.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_operating_agent.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_operating_agent.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_operating_agent.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_orchestrator.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_orchestrator.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_orchestrator.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_orchestrator.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_pipeline_modules.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_pipeline_modules.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_pipeline_modules.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_pipeline_modules.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_semantic_agent_contract.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_semantic_agent_contract.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_semantic_agent_contract.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_semantic_agent_contract.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_semantic_agent_contract.py",
+      "target": "typing"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_semantic_agent_contract.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_canvas_publish.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_canvas_publish.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_slack_canvas_publish.py",
+      "target": "json"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_canvas_publish.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_canvas_registry.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_canvas_registry.py",
+      "target": "datetime"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_canvas_registry.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_correction.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_slack_correction.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_correction.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_slack_correction.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_correction.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_e2e.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_e2e.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_e2e.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_e2e.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_fast_cycle.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_fast_cycle.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_fast_cycle.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_fast_cycle.py",
+      "target": "typing"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_fast_cycle.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_monthly_page.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_monthly_page.py",
+      "target": "datetime"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_monthly_page.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_routines.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_routines.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_routines.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_slack_routines.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_routines.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_socket.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_slack_socket.py",
+      "target": "asyncio"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_slack_socket.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_socket.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_socket.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_slack_socket.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_socket.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_task_cycle.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_task_cycle.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_task_cycle.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_task_cycle.py",
+      "target": "typing"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_slack_task_cycle.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_store_migrations.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_store_migrations.py",
+      "target": "json"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_store_migrations.py",
+      "target": "sqlite3"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_store_migrations.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_store_migrations.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_task_core_bridge.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_task_core_bridge.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_task_core_bridge.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_task_core_bridge.py",
+      "target": "task_management"
+    }
+  ],
+  "entrypoints": [
+    {
+      "kind": "python-project-script",
+      "name": "task-management",
+      "source": "pyproject.toml",
+      "target": "task_management.cli:main"
+    }
+  ],
+  "files": [
+    {
+      "language": null,
+      "path": ".gitignore",
+      "size_bytes": 255,
+      "suffix": ""
+    },
+    {
+      "language": "Markdown",
+      "path": "AGENTS.md",
+      "size_bytes": 2836,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "CLAUDE.md",
+      "size_bytes": 2013,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "PUBLIC_RELEASE_NOTES.md",
+      "size_bytes": 1649,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "README.md",
+      "size_bytes": 9916,
+      "suffix": ".md"
+    },
+    {
+      "language": "TOML",
+      "path": "pyproject.toml",
+      "size_bytes": 671,
+      "suffix": ".toml"
+    },
+    {
+      "language": "Markdown",
+      "path": ".codex/skills/slack-canvas-task-page/SKILL.md",
+      "size_bytes": 1776,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "docs/agent-flow.md",
+      "size_bytes": 5713,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "docs/clean-release-boundary.md",
+      "size_bytes": 2306,
+      "suffix": ".md"
+    },
+    {
+      "language": "HTML",
+      "path": "docs/slack-app-setup-guide.html",
+      "size_bytes": 41458,
+      "suffix": ".html"
+    },
+    {
+      "language": "HTML",
+      "path": "docs/slack-app-setup-guide.standalone.html",
+      "size_bytes": 2849773,
+      "suffix": ".html"
+    },
+    {
+      "language": "HTML",
+      "path": "docs/agent-flow-demo/index.html",
+      "size_bytes": 26123,
+      "suffix": ".html"
+    },
+    {
+      "language": null,
+      "path": "docs/screenshots/slack-app-settings/00-create-app.png",
+      "size_bytes": 238042,
+      "suffix": ".png"
+    },
+    {
+      "language": null,
+      "path": "docs/screenshots/slack-app-settings/02-socket-mode.png",
+      "size_bytes": 272710,
+      "suffix": ".png"
+    },
+    {
+      "language": null,
+      "path": "docs/screenshots/slack-app-settings/03-oauth-required-scopes.png",
+      "size_bytes": 136959,
+      "suffix": ".png"
+    },
+    {
+      "language": null,
+      "path": "docs/screenshots/slack-app-settings/04-app-home-tabs.png",
+      "size_bytes": 233191,
+      "suffix": ".png"
+    },
+    {
+      "language": null,
+      "path": "docs/screenshots/slack-app-settings/05-install-1-button.png",
+      "size_bytes": 63467,
+      "suffix": ".png"
+    },
+    {
+      "language": null,
+      "path": "docs/screenshots/slack-app-settings/06-event-subscriptions-dm.png",
+      "size_bytes": 275931,
+      "suffix": ".png"
+    },
+    {
+      "language": null,
+      "path": "docs/screenshots/slack-app-settings/09-slack-user-id.png",
+      "size_bytes": 96707,
+      "suffix": ".png"
+    },
+    {
+      "language": null,
+      "path": "docs/screenshots/slack-app-settings/10-slack-dm-channel-id.png",
+      "size_bytes": 400274,
+      "suffix": ".png"
+    },
+    {
+      "language": null,
+      "path": "example_task_management.egg-info/PKG-INFO",
+      "size_bytes": 434,
+      "suffix": ""
+    },
+    {
+      "language": null,
+      "path": "example_task_management.egg-info/SOURCES.txt",
+      "size_bytes": 2825,
+      "suffix": ".txt"
+    },
+    {
+      "language": null,
+      "path": "example_task_management.egg-info/dependency_links.txt",
+      "size_bytes": 1,
+      "suffix": ".txt"
+    },
+    {
+      "language": null,
+      "path": "example_task_management.egg-info/entry_points.txt",
+      "size_bytes": 61,
+      "suffix": ".txt"
+    },
+    {
+      "language": null,
+      "path": "example_task_management.egg-info/requires.txt",
+      "size_bytes": 85,
+      "suffix": ".txt"
+    },
+    {
+      "language": null,
+      "path": "example_task_management.egg-info/top_level.txt",
+      "size_bytes": 16,
+      "suffix": ".txt"
+    },
+    {
+      "language": "Markdown",
+      "path": "examples/README.md",
+      "size_bytes": 1836,
+      "suffix": ".md"
+    },
+    {
+      "language": "JSON",
+      "path": "examples/claude_smoke_private.json",
+      "size_bytes": 210,
+      "suffix": ".json"
+    },
+    {
+      "language": "JSON",
+      "path": "examples/slack_dogfood_demo.json",
+      "size_bytes": 905,
+      "suffix": ".json"
+    },
+    {
+      "language": "JSON",
+      "path": "examples/slack_socket_message_im.json",
+      "size_bytes": 517,
+      "suffix": ".json"
+    },
+    {
+      "language": "JSON",
+      "path": "examples/slack_transcript_demo.json",
+      "size_bytes": 382,
+      "suffix": ".json"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/claude_code_backend_handoff.md",
+      "size_bytes": 5697,
+      "suffix": ".md"
+    },
+    {
+      "language": null,
+      "path": "ops/com.example.task-management.dashboard-http.plist.template",
+      "size_bytes": 1043,
+      "suffix": ".template"
+    },
+    {
+      "language": null,
+      "path": "ops/com.example.task-management.slack-live.plist.template",
+      "size_bytes": 874,
+      "suffix": ".template"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/fresh_demo_install.md",
+      "size_bytes": 12629,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/human-message-contract.md",
+      "size_bytes": 1709,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/local_env_markdown_template.md",
+      "size_bytes": 2863,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/semantic_operating_principle.md",
+      "size_bytes": 865,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/slack-live-loop-ops.md",
+      "size_bytes": 3130,
+      "suffix": ".md"
+    },
+    {
+      "language": "Shell",
+      "path": "ops/slack-live-loop.sh",
+      "size_bytes": 2718,
+      "suffix": ".sh"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/slack_app_settings_guide.md",
+      "size_bytes": 12875,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/slack_app_setup.md",
+      "size_bytes": 1975,
+      "suffix": ".md"
+    },
+    {
+      "language": "Markdown",
+      "path": "ops/slack_bot_connection_guide.md",
+      "size_bytes": 9429,
+      "suffix": ".md"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/__init__.py",
+      "size_bytes": 2350,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/approval_policy.py",
+      "size_bytes": 13518,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/attention.py",
+      "size_bytes": 5890,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/backfill_report.py",
+      "size_bytes": 3772,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/chat_adapter.py",
+      "size_bytes": 906,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/claude_code_operating_agent.py",
+      "size_bytes": 11872,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/cli.py",
+      "size_bytes": 69100,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/codex_operating_agent.py",
+      "size_bytes": 19192,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/collaboration_context.py",
+      "size_bytes": 9221,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/commands.py",
+      "size_bytes": 1642,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/conflict_policy.py",
+      "size_bytes": 14497,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/deferred_policy.py",
+      "size_bytes": 706,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/discussion_adapter.py",
+      "size_bytes": 24194,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/domain.py",
+      "size_bytes": 3991,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/export_service.py",
+      "size_bytes": 1923,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/frontend.py",
+      "size_bytes": 57803,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/human_view.py",
+      "size_bytes": 8585,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/kakao_export_adapter.py",
+      "size_bytes": 4225,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/openai_operating_agent.py",
+      "size_bytes": 13048,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/operating_agent.py",
+      "size_bytes": 32804,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/operating_agent_prompt.py",
+      "size_bytes": 8368,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/orchestrator.py",
+      "size_bytes": 95551,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/pending_info.py",
+      "size_bytes": 5883,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/proposal_builder.py",
+      "size_bytes": 3875,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/relations.py",
+      "size_bytes": 13010,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/reminders.py",
+      "size_bytes": 7443,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/semantic_context.py",
+      "size_bytes": 10103,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/simulator.py",
+      "size_bytes": 4011,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_adapter.py",
+      "size_bytes": 27491,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_canvas.py",
+      "size_bytes": 2373,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_canvas_registry.py",
+      "size_bytes": 3220,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_correction.py",
+      "size_bytes": 3589,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_cycle.py",
+      "size_bytes": 4280,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_digest.py",
+      "size_bytes": 5399,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_e2e.py",
+      "size_bytes": 17436,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_export_adapter.py",
+      "size_bytes": 437,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_fast_cycle.py",
+      "size_bytes": 3948,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_home.py",
+      "size_bytes": 10991,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_page.py",
+      "size_bytes": 8665,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slack_socket.py",
+      "size_bytes": 26874,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/slot_validator.py",
+      "size_bytes": 4551,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/sort_keys.py",
+      "size_bytes": 2161,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/store.py",
+      "size_bytes": 27039,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/task_core_bridge.py",
+      "size_bytes": 12950,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/task_reconciler.py",
+      "size_bytes": 43309,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/telegram_export_adapter.py",
+      "size_bytes": 151,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/timeline.py",
+      "size_bytes": 3198,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/work_item_state.py",
+      "size_bytes": 2179,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/workflow_normalizer.py",
+      "size_bytes": 24616,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "task_management/youtube_reference.py",
+      "size_bytes": 79,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_claude_code_operating_agent.py",
+      "size_bytes": 8307,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_codex_operating_agent.py",
+      "size_bytes": 12766,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_commands_export_cli.py",
+      "size_bytes": 22662,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_discussion_adapter.py",
+      "size_bytes": 6456,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_encoding_contract.py",
+      "size_bytes": 1579,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_external_collaboration_context.py",
+      "size_bytes": 16715,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_feedback_routing.py",
+      "size_bytes": 24427,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_frontend_surfaces.py",
+      "size_bytes": 18961,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_hierarchy_subtasks.py",
+      "size_bytes": 30085,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_human_view.py",
+      "size_bytes": 7432,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_kakao_export_adapter.py",
+      "size_bytes": 1587,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_openai_operating_agent.py",
+      "size_bytes": 4664,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_operating_agent.py",
+      "size_bytes": 4689,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_orchestrator.py",
+      "size_bytes": 7720,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_pipeline_modules.py",
+      "size_bytes": 8899,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_semantic_agent_contract.py",
+      "size_bytes": 10121,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_canvas_publish.py",
+      "size_bytes": 2637,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_canvas_registry.py",
+      "size_bytes": 2238,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_correction.py",
+      "size_bytes": 5057,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_e2e.py",
+      "size_bytes": 3317,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_fast_cycle.py",
+      "size_bytes": 28663,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_monthly_page.py",
+      "size_bytes": 5301,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_routines.py",
+      "size_bytes": 21554,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_socket.py",
+      "size_bytes": 20252,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_slack_task_cycle.py",
+      "size_bytes": 9985,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_store_migrations.py",
+      "size_bytes": 2989,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_task_core_bridge.py",
+      "size_bytes": 5197,
+      "suffix": ".py"
+    }
+  ],
+  "generated_at": "2026-06-03T08:43:17Z",
+  "important_configs": [
+    ".codex/skills/slack-canvas-task-page/SKILL.md",
+    "AGENTS.md",
+    "README.md",
+    "examples/README.md",
+    "pyproject.toml"
+  ],
+  "python": {
+    "first_party_roots": [
+      "task_management"
+    ],
+    "packages": [
+      {
+        "package": "task_management",
+        "path": "task_management"
+      }
+    ]
+  },
+  "safety": {
+    "excluded_dir_names": [
+      ".DS_Store",
+      ".cache",
+      ".git",
+      ".hg",
+      ".mypy_cache",
+      ".next",
+      ".nuxt",
+      ".omx",
+      ".pytest_cache",
+      ".ruff_cache",
+      ".svn",
+      ".tox",
+      ".turbo",
+      ".venv",
+      "__pycache__",
+      "bower_components",
+      "build",
+      "coverage",
+      "dist",
+      "env",
+      "log",
+      "logs",
+      "node_modules",
+      "target",
+      "temp",
+      "tmp",
+      "venv"
+    ],
+    "note": "Skipped paths are not read into generated architecture artifacts.",
+    "runtime_state_file_globs": [
+      "*.db",
+      "*.db-*",
+      "*.sqlite",
+      "*.sqlite-*",
+      "*.sqlite3",
+      "*.sqlite3-*",
+      "*.log",
+      "*.jsonl",
+      "*.pid",
+      "*.sock"
+    ],
+    "secret_file_globs": [
+      ".env",
+      ".env*",
+      ".env.*",
+      "*.pem",
+      "*.key",
+      "*.p12",
+      "*.pfx",
+      "id_rsa",
+      "id_dsa",
+      "id_ecdsa",
+      "id_ed25519",
+      "*credential*",
+      "*credentials*",
+      "*secret*",
+      "*token*",
+      "*session*"
+    ],
+    "sensitive_dir_names": [
+      ".aws",
+      ".gnupg",
+      ".kube",
+      ".ssh"
+    ],
+    "sensitive_file_names": [
+      ".git-credentials",
+      ".netrc",
+      ".npmrc",
+      ".pypirc",
+      "auth.json"
+    ],
+    "sensitive_rel_path_globs": [
+      ".aws/*",
+      ".codex/auth.json",
+      ".codex/*credential*",
+      ".codex/*secret*",
+      ".codex/*session*",
+      ".codex/*token*",
+      ".codex/sessions/*",
+      ".config/gh/hosts.yml",
+      ".docker/config.json",
+      ".gnupg/*",
+      ".kube/*",
+      ".ssh/*"
+    ],
+    "skipped_paths": [
+      ".git/",
+      ".pytest_cache/",
+      ".env.example",
+      ".state-md/task_management.sqlite3",
+      "docs/codeboarding/",
+      "docs/screenshots/slack-app-settings/01-app-token-1-generate.png",
+      "docs/screenshots/slack-app-settings/01-app-token-2-scope.png",
+      "docs/screenshots/slack-app-settings/01-app-token-3-copy.png",
+      "docs/screenshots/slack-app-settings/05-install-2-token.png",
+      "ops/com.example.task-management.slack-secretary.plist.template",
+      "ops/slack-secretary-supervisor.sh",
+      "task_management/secretary.py",
+      "tests/test_proactive_secretary.py"
+    ]
+  },
+  "schema_version": 1,
+  "target_repo": "<repo-root>",
+  "tree_summary": [
+    ".codex/ \u2014 1 files; skills (1)",
+    ".gitignore",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "PUBLIC_RELEASE_NOTES.md",
+    "README.md",
+    "docs/ \u2014 13 files; screenshots (8), agent-flow.md (1), clean-release-boundary.md (1), slack-app-setup-guide.html (1), slack-app-setup-guide.standalone.html (1), agent-flow-demo (1)",
+    "example_task_management.egg-info/ \u2014 6 files; PKG-INFO (1), SOURCES.txt (1), dependency_links.txt (1), entry_points.txt (1), requires.txt (1), top_level.txt (1)",
+    "examples/ \u2014 5 files; README.md (1), claude_smoke_private.json (1), slack_dogfood_demo.json (1), slack_socket_message_im.json (1), slack_transcript_demo.json (1)",
+    "ops/ \u2014 12 files; claude_code_backend_handoff.md (1), com.example.task-management.dashboard-http.plist.template (1), com.example.task-management.slack-live.plist.template (1), fresh_demo_install.md (1), human-message-contract.md (1), local_env_markdown_template.md (1)",
+    "pyproject.toml",
+    "task_management/ \u2014 50 files; __init__.py (1), approval_policy.py (1), attention.py (1), backfill_report.py (1), chat_adapter.py (1), claude_code_operating_agent.py (1)",
+    "tests/ \u2014 27 files; test_claude_code_operating_agent.py (1), test_codex_operating_agent.py (1), test_commands_export_cli.py (1), test_discussion_adapter.py (1), test_encoding_contract.py (1), test_external_collaboration_context.py (1)"
+  ],
+  "written_outputs": [
+    "<repo-root>/docs/codeboarding/README.md",
+    "<repo-root>/docs/codeboarding/inventory.json",
+    "<repo-root>/docs/codeboarding/architecture.md",
+    "<repo-root>/docs/codeboarding/module-map.md",
+    "<repo-root>/docs/codeboarding/runtime-flow.md",
+    "<repo-root>/docs/codeboarding/data-flow.md",
+    "<repo-root>/docs/codeboarding/diagrams/overview.mmd",
+    "<repo-root>/docs/codeboarding/diagrams/module-dependencies.mmd",
+    "<repo-root>/docs/codeboarding/diagrams/runtime-flow.mmd",
+    "<repo-root>/docs/codeboarding/diagrams/data-flow.mmd"
+  ]
+}

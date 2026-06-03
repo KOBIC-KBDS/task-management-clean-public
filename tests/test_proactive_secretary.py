@@ -7,7 +7,7 @@ from typing import Any, Sequence
 import pytest
 
 from task_management.cli import main
-from task_management.domain import ApprovalRequest, IncomingMessage, Proposal
+from task_management.domain import ApprovalRequest, IncomingMessage, OutboundMessage, Proposal
 from task_management.operating_agent import OperatingAgentDecision, ProposalPatch
 from task_management.orchestrator import TeamTaskOrchestrator
 from task_management.secretary import (
@@ -16,7 +16,7 @@ from task_management.secretary import (
     build_morning_briefing,
     build_proactive_checks,
 )
-from task_management.slack_adapter import SlackAdapterError, SlackDmAdapter, SlackDmConfig, dispatch_slack_outbound
+from task_management.slack_adapter import SlackAdapterError, SlackDmAdapter, SlackDmConfig, dispatch_slack_outbound, queue_slack_outbound
 from task_management.store import TeamTaskStore
 
 
@@ -236,6 +236,34 @@ def test_twenty_scenario_matrix_executes_a_policy_smoke(tmp_path: Path, scenario
         briefing = build_morning_briefing(store, now=NOW, actor_id="me", reserve=False)
         assert len(briefing) == 1
         assert scenario["summary"] in briefing[0].text
+
+
+def test_duplicate_outbound_dedupe_records_skip_event(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    adapter = SlackDmAdapter(SlackDmConfig(actor_id="me", dm_channel_id="DTEST", bot_token="test-token"))
+    message = OutboundMessage(
+        surface="personal_chat",
+        recipient_id="me",
+        message_type="briefing",
+        text="Hello",
+        card={"dedupe_key": "test/dedupe"},
+    )
+    store.record_outbound_delivery(
+        dedupe_key="test/dedupe",
+        surface="personal_chat",
+        recipient_id="me",
+        provider="slack",
+        provider_message_id="111.222",
+        sent_at=NOW,
+        payload={"text": "Hello"},
+    )
+
+    queued = queue_slack_outbound(store, adapter, (message,), queued_at=NOW)
+
+    assert queued == 0
+    skipped = [event for event in store.read_events() if event["type"] == "slack.message.skipped"]
+    assert skipped[-1]["payload"]["reason"] == "duplicate_dedupe_key"
+    assert skipped[-1]["payload"]["dedupe_key"] == "test/dedupe"
 
 
 def test_morning_briefing_summarizes_today_pending_and_dedupes(tmp_path: Path) -> None:
@@ -548,7 +576,7 @@ def test_morning_briefing_subtask_tree_shows_progress_status(tmp_path: Path) -> 
     briefing = build_morning_briefing(store, now=NOW, actor_id="me", reserve=False)[0]
 
     assert "  ↳ 하위작업 1/2 완료 · 다음: 2/2 남은 하위작업" in briefing.text
-    assert "    ├─ [1/2] 완료된 하위작업 — ✅ 완료" in briefing.text
+    assert "    ├─ [1/2] ~완료된 하위작업~ — ✅ 완료" in briefing.text
     assert "    └─ [2/2] 남은 하위작업 — 승인 대기" in briefing.text
 
 

@@ -19,7 +19,7 @@ def build_slack_home_view(
 ) -> dict[str, Any]:
     """Build a compact Slack App Home view from the same state as the web task page."""
 
-    model = build_web_task_page_model(store, today=now.date())
+    model = build_web_task_page_model(store, today=now.date(), max_completed_children=2)
     sections = model["sections"]
     today_items = list(sections["today"])
     today_ids = {item["proposal_id"] for item in today_items}
@@ -142,10 +142,11 @@ def _text_section(title: str, lines: list[str]) -> dict[str, Any]:
 
 
 def _proposal_line(item: Mapping[str, str]) -> str:
+    urgency = item.get("urgency_label", "")
     detail = " · ".join(
         part
         for part in (
-            "🔴 마감 지남" if item.get("is_overdue") == "true" else "",
+            f"🔴 {urgency}" if urgency else "",
             item.get("date_label", "") or item.get("date", ""),
             item.get("time_window", ""),
             item.get("status_label", ""),
@@ -155,12 +156,12 @@ def _proposal_line(item: Mapping[str, str]) -> str:
         )
         if part
     )
-    title = _escape(item.get("title", ""))
-    line = f"*{title}*" + (f" — {_escape(detail)}" if detail else "")
+    title = _title_display(item)
+    line = title + (f" — {_escape(detail)}" if detail else "")
     children = [child for child in item.get("children", []) if isinstance(child, Mapping)]  # type: ignore[attr-defined]
     child_lines = []
     if children:
-        child_lines.append(_subtask_summary_line(children))
+        child_lines.append(_subtask_summary_line(item, children))
     for index, child in enumerate(children):
         if not isinstance(child, Mapping):
             continue
@@ -171,25 +172,30 @@ def _proposal_line(item: Mapping[str, str]) -> str:
     return line
 
 
-def _subtask_summary_line(children: list[Mapping[str, str]]) -> str:
-    done_count = sum(1 for child in children if child.get("status") in {"done", "applied"})
+def _subtask_summary_line(parent: Mapping[str, str], children: list[Mapping[str, str]]) -> str:
+    done_count = int(parent.get("child_done_count") or sum(1 for child in children if child.get("status") in {"done", "applied"}))
+    total_count = int(parent.get("child_total_count") or len(children))
+    hidden_count = int(parent.get("hidden_completed_child_count") or 0)
     next_child = next((child for child in children if child.get("status") not in {"done", "applied", "rejected"}), None)
     next_label = ""
     if next_child is not None:
         step = str(next_child.get("step_label") or "")
         title = _escape(str(next_child.get("title") or ""))
         next_label = f" · 다음: {step} {title}" if step else f" · 다음: {title}"
-    return f"  ↳ _하위작업 {done_count}/{len(children)} 완료{next_label}_"
+    hidden_label = f" · 완료 {hidden_count}개 숨김" if hidden_count else ""
+    return f"  ↳ _하위작업 {done_count}/{total_count} 완료{next_label}{hidden_label}_"
 
 
 def _subtask_line(child: Mapping[str, str]) -> str:
     step = str(child.get("step_label") or "")
     step_prefix = f"[{_escape(step)}] " if step else ""
-    title = _escape(str(child.get("title") or ""))
+    title = _title_display(child)
+    urgency = str(child.get("urgency_label") or "")
     detail = " · ".join(
         part
         for part in (
             _status_display(child),
+            f"🔴 {urgency}" if urgency else "",
             child.get("date_label", "") or child.get("date", ""),
             child.get("time_window", ""),
             f"진행: {child.get('progress_status', '')}" if child.get("progress_status") else "",
@@ -198,7 +204,14 @@ def _subtask_line(child: Mapping[str, str]) -> str:
         )
         if part
     )
-    return f"{step_prefix}*{title}*" + (f" — {_escape(detail)}" if detail else "")
+    return f"{step_prefix}{title}" + (f" — {_escape(detail)}" if detail else "")
+
+
+def _title_display(item: Mapping[str, str]) -> str:
+    title = _escape(str(item.get("title") or ""))
+    if item.get("status") in {"done", "applied"}:
+        return f"~{title}~"
+    return f"*{title}*"
 
 
 def _status_display(item: Mapping[str, str]) -> str:

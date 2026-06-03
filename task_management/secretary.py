@@ -21,9 +21,24 @@ from .human_view import (
     render_missing_slot_sentence,
     short_id,
 )
-from .relations import blocking_dependencies, child_proposals, is_relation_complete, parent_proposal_id, step_label
+from .relations import (
+    WORKFLOW_PARENT_ROLE,
+    WORKFLOW_ROLE_KEY,
+    blocking_dependencies,
+    child_proposals,
+    is_relation_complete,
+    parent_proposal_id,
+    step_label,
+)
 from .sort_keys import proposal_deadline_sort_key
 from .store import TeamTaskStore
+from .work_item_state import (
+    is_past_scheduled_commitment,
+    needs_time_resolution,
+    requires_progress_confirmation,
+    work_item_due_detail_label,
+    work_item_urgency_label,
+)
 
 
 def build_morning_briefing(
@@ -53,10 +68,11 @@ def build_morning_briefing(
         proposal
         for proposal in proposals
         if proposal.status in {"approved", "applied", "awaiting_approval"}
-        and proposal.kind in {"task", "question"}
         and proposal.status != "done"
-        and proposal.due_date is not None
-        and proposal.due_date <= today
+        and (
+            (proposal.kind in {"task", "question", "routine"} and proposal.due_date is not None and proposal.due_date <= today)
+            or is_past_scheduled_commitment(proposal, today=today)
+        )
         and not has_deferred_missing_info(proposal)
     ]
     due_task_ids = {proposal.proposal_id for proposal in due_tasks}
@@ -67,7 +83,7 @@ def build_morning_briefing(
         and not has_deferred_missing_info(proposal)
         and proposal.proposal_id not in due_task_ids
     ]
-    overdue = [proposal for proposal in due_tasks if proposal.due_date is not None and proposal.due_date < today]
+    overdue = [proposal for proposal in due_tasks if work_item_urgency_label(proposal, today=today)]
     pending_requests = [
         (request, store.get_proposal(request.proposal_id))
         for request in store.list_approval_requests(approver_id=actor_id, status="pending")
@@ -183,7 +199,7 @@ def build_afternoon_briefing(
         for proposal in proposals
         if proposal.status in {"approved", "applied", "awaiting_approval"}
         and proposal.status != "done"
-        and _proposal_date(proposal) == today
+        and (_proposal_date(proposal) == today or is_past_scheduled_commitment(proposal, today=today))
         and not has_deferred_missing_info(proposal)
     ]
     week_open = [
@@ -278,31 +294,39 @@ def build_proactive_checks(
     for proposal in all_proposals:
         if not _is_personal_scope(proposal, actor_id):
             continue
-        if proposal.status not in {"approved", "applied"} or proposal.kind not in {"task", "question"}:
+        if proposal.status not in {"approved", "applied"}:
             continue
-        if proposal.due_date is None or proposal.due_date > today:
+        if not requires_progress_confirmation(proposal, today=today):
             continue
         if has_deferred_missing_info(proposal):
             continue
         dedupe_key = proactive_check_dedupe_key(proposal, actor_id=actor_id, today=today)
         if reserve and store.has_outbound_delivery(dedupe_key):
             continue
-        overdue = proposal.due_date < today
-        prefix = "밀린 작업 확인" if overdue else "오늘 할 일 확인"
+        overdue = bool(work_item_urgency_label(proposal, today=today))
+        is_past_event = is_past_scheduled_commitment(proposal, today=today)
+        prefix = "지난 일정 확인" if is_past_event else "밀린 작업 확인" if overdue else "오늘 할 일 확인"
         blockers = blocking_dependencies(proposal, proposals_by_id)
+        if proposal.due_date is not None:
+            date_sentence = f"{proposal.title}은(는) {date_label(proposal.due_date)}까지로 잡혀 있습니다."
+        elif proposal.scheduled_date is not None:
+            date_sentence = f"{proposal.title}은(는) {date_label(proposal.scheduled_date)} 일정으로 잡혀 있습니다."
+        else:
+            date_sentence = f"{proposal.title}은(는) 날짜 미정입니다."
         if blockers:
             blocker_titles = ", ".join(f"*{dependency.title}*" for dependency in blockers)
             text = (
                 f"*{prefix}*\n"
-                f"{proposal.title}은(는) {date_label(proposal.due_date)}까지로 잡혀 있습니다.\n"
+                f"{date_sentence}\n"
                 f"먼저 {blocker_titles} 완료 여부가 확인되어야 합니다. "
                 "선행 작업의 완료/진행/연기 상태를 알려주세요."
             )
         else:
+            request_sentence = "결과/참석 여부를 알려주세요." if is_past_event else "진행 상황을 알려주세요."
             text = (
                 f"*{prefix}*\n"
-                f"{proposal.title}은(는) {date_label(proposal.due_date)}까지로 잡혀 있습니다.\n"
-                "진행 상황을 알려주세요. 완료했다면 예: "
+                f"{date_sentence}\n"
+                f"{request_sentence} 완료했다면 예: "
                 f"`{proposal.title} 완료`"
             )
         message = OutboundMessage(
@@ -315,7 +339,8 @@ def build_proactive_checks(
                 "dedupe_key": dedupe_key,
                 "proposal_id": proposal.proposal_id,
                 "title": proposal.title,
-                "due_date": proposal.due_date.isoformat(),
+                "due_date": proposal.due_date.isoformat() if proposal.due_date else "",
+                "scheduled_date": proposal.scheduled_date.isoformat() if proposal.scheduled_date else "",
                 "overdue": str(overdue).lower(),
             },
         )
@@ -501,40 +526,51 @@ def _proposal_lines(
     if not proposals:
         return [empty]
     visible_ids = {proposal.proposal_id for proposal in proposals}
-    child_ids_with_visible_parent = {
-        proposal.proposal_id
-        for proposal in proposals
-        if parent_proposal_id(proposal) and parent_proposal_id(proposal) in visible_ids
-    }
     all_items = all_proposals or proposals
+    all_by_id = {proposal.proposal_id: proposal for proposal in all_items}
     lines: list[str] = []
+    seen: set[str] = set()
     sort_key = (
         (lambda item: proposal_deadline_sort_key(item, today=today, overdue_last=True))
         if today is not None
         else _sort_key
     )
     for proposal in sorted(proposals, key=sort_key):
-        if proposal.proposal_id in child_ids_with_visible_parent:
+        anchor = _section_anchor(proposal, all_by_id, visible_ids)
+        if anchor.proposal_id in seen:
             continue
-        lines.append(f"- {render_confirmed_sentence(proposal)}{_overdue_label(proposal, today=today)}")
-        visible_children = child_proposals(proposal, all_items)
-        if visible_children:
-            lines.append(_subtask_summary_line(visible_children))
+        seen.add(anchor.proposal_id)
+        lines.append(_proposal_line(anchor, today=today))
+        all_children = child_proposals(anchor, all_items)
+        visible_children = _display_children(all_children, max_completed_children=2)
+        if all_children:
+            lines.append(_subtask_summary_line(all_children, visible_children))
         for index, child in enumerate(visible_children):
             connector = "└─" if index == len(visible_children) - 1 else "├─"
             lines.append(f"    {connector} {_subtask_line(child, today=today)}")
     return lines
 
 
-def _subtask_summary_line(children: tuple[Proposal, ...]) -> str:
-    done_count = sum(1 for child in children if child.status in {"done", "applied"})
-    total = len(children)
-    next_child = next((child for child in children if not is_relation_complete(child)), None)
+def _proposal_line(proposal: Proposal, *, today: date | None) -> str:
+    if _is_workflow_context_parent(proposal):
+        label = _title_display(proposal)
+        return f"- {label} — 하위작업 중심으로 확인합니다."
+    return f"- {render_confirmed_sentence(proposal)}{_overdue_label(proposal, today=today)}"
+
+
+def _subtask_summary_line(all_children: tuple[Proposal, ...], visible_children: tuple[Proposal, ...]) -> str:
+    done_count = sum(1 for child in all_children if child.status in {"done", "applied"})
+    total = len(all_children)
+    hidden_count = sum(1 for child in all_children if child.status in {"done", "applied"}) - sum(
+        1 for child in visible_children if child.status in {"done", "applied"}
+    )
+    next_child = next((child for child in all_children if not is_relation_complete(child)), None)
     next_label = ""
     if next_child is not None:
         step = step_label(next_child)
         next_label = f" · 다음: {step} {next_child.title}" if step else f" · 다음: {next_child.title}"
-    return f"  ↳ 하위작업 {done_count}/{total} 완료{next_label}"
+    hidden_label = f" · 완료 {hidden_count}개 숨김" if hidden_count else ""
+    return f"  ↳ 하위작업 {done_count}/{total} 완료{next_label}{hidden_label}"
 
 
 def _subtask_line(proposal: Proposal, *, today: date | None) -> str:
@@ -552,11 +588,59 @@ def _subtask_line(proposal: Proposal, *, today: date | None) -> str:
     ]
     detail = " · ".join(part for part in parts if part)
     return (
-        f"{step_prefix}{proposal.title}"
+        f"{step_prefix}{_title_display(proposal)}"
         + (f" — {detail}" if detail else "")
         + f" `{short_id(proposal.proposal_id)}`"
         + _overdue_label(proposal, today=today)
     )
+
+
+def _title_display(proposal: Proposal) -> str:
+    if proposal.status in {"done", "applied"}:
+        return f"~{proposal.title}~"
+    return proposal.title
+
+
+def _section_anchor(proposal: Proposal, proposals_by_id: dict[str, Proposal], visible_ids: set[str]) -> Proposal:
+    current = proposal
+    anchor: Proposal | None = None
+    seen: set[str] = set()
+    while True:
+        parent_id = parent_proposal_id(current)
+        parent = proposals_by_id.get(parent_id) if parent_id else None
+        if parent is None or parent.proposal_id in seen:
+            break
+        seen.add(parent.proposal_id)
+        if parent.proposal_id in visible_ids or _is_workflow_context_parent(parent):
+            anchor = parent
+        current = parent
+    return anchor or proposal
+
+
+def _display_children(children: tuple[Proposal, ...], *, max_completed_children: int) -> tuple[Proposal, ...]:
+    completed = [child for child in children if child.status in {"done", "applied"}]
+    if len(completed) <= max_completed_children:
+        return children
+    recent_completed_ids = {
+        child.proposal_id
+        for child in sorted(completed, key=_completion_sort_key, reverse=True)[:max_completed_children]
+    }
+    return tuple(
+        child
+        for child in children
+        if child.status not in {"done", "applied"} or child.proposal_id in recent_completed_ids
+    )
+
+
+def _completion_sort_key(proposal: Proposal) -> tuple[str, str]:
+    completed_at = proposal.metadata.get("completed_at", "")
+    updated_at = proposal.updated_at.isoformat(timespec="seconds") if proposal.updated_at else ""
+    created_at = proposal.created_at.isoformat(timespec="seconds") if proposal.created_at else ""
+    return (completed_at or updated_at or created_at, proposal.proposal_id)
+
+
+def _is_workflow_context_parent(proposal: Proposal) -> bool:
+    return proposal.metadata.get("workflow_container") == "true" or proposal.metadata.get(WORKFLOW_ROLE_KEY) == WORKFLOW_PARENT_ROLE
 
 
 def _status_display(status: str) -> str:
@@ -587,8 +671,9 @@ def _attention_lines(items: tuple[HumanAttentionItem, ...], *, today: date) -> l
             lines.append(f"- *{proposal.title}*: 승인/변경/거절 중 어떻게 처리할지 알려주세요.")
             continue
 
-        due_detail = _proposal_due_detail(proposal)
-        overdue_label = " · 🔴 마감 지남" if item.overdue else ""
+        due_detail = _proposal_due_detail(proposal, today=today)
+        urgency = work_item_urgency_label(proposal, today=today)
+        overdue_label = f" · 🔴 {urgency}" if urgency else ""
         if item.blocking_dependencies:
             blockers = ", ".join(f"*{dependency.title}*" for dependency in item.blocking_dependencies)
             lines.append(
@@ -596,7 +681,12 @@ def _attention_lines(items: tuple[HumanAttentionItem, ...], *, today: date) -> l
                 " 선행 작업의 완료/진행/연기 상태를 알려주세요."
             )
             continue
-        prefix = "마감이 지난 작업입니다" if item.overdue else "오늘 확인할 작업입니다"
+        if is_past_scheduled_commitment(proposal, today=today):
+            prefix = "일정이 지난 항목입니다"
+        elif item.overdue:
+            prefix = "마감이 지난 작업입니다"
+        else:
+            prefix = "오늘 확인할 작업입니다"
         lines.append(
             f"- *{proposal.title}*: {due_detail}{overdue_label}. {prefix}. "
             "완료/진행/연기 중 하나로 알려주세요."
@@ -605,17 +695,14 @@ def _attention_lines(items: tuple[HumanAttentionItem, ...], *, today: date) -> l
 
 
 def _overdue_label(proposal: Proposal, *, today: date | None) -> str:
-    if today is None or not _is_overdue(proposal, today=today):
+    if today is None:
         return ""
-    return " · 🔴 마감 지남"
+    urgency = work_item_urgency_label(proposal, today=today)
+    return f" · 🔴 {urgency}" if urgency else ""
 
 
 def _is_overdue(proposal: Proposal, *, today: date) -> bool:
-    return (
-        proposal.status not in {"done", "rejected"}
-        and proposal.due_date is not None
-        and proposal.due_date < today
-    )
+    return needs_time_resolution(proposal, today=today)
 
 
 def _attention_display_sort_key(item: HumanAttentionItem, *, today: date) -> tuple[int, str, int, str, str]:
@@ -638,13 +725,14 @@ def _proposal_with_deferred_missing_slots(proposal: Proposal) -> Proposal:
     return replace(proposal, missing_slots=slots)
 
 
-def _proposal_due_detail(proposal: Proposal) -> str:
-    if proposal.due_date is None:
+def _proposal_due_detail(proposal: Proposal, *, today: date) -> str:
+    proposal_date = proposal.due_date or proposal.scheduled_date
+    if proposal_date is None:
         return "기한 미정"
-    parts = [date_label(proposal.due_date)]
+    parts = [date_label(proposal_date)]
     if proposal.time_window:
         parts.append(proposal.time_window)
-    return "기한: " + " ".join(parts)
+    return f"{work_item_due_detail_label(proposal, today=today)}: " + " ".join(parts)
 
 
 def _proposal_date(proposal: Proposal) -> date | None:

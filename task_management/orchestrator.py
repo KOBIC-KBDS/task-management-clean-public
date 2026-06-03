@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 import hashlib
 import os
+import re
 from typing import Iterable
 
 from .commands import InstanceProbeCommand, parse_chat_command, parse_instance_probe
@@ -59,8 +60,10 @@ from .relations import (
     workflow_group_id,
 )
 from .slot_validator import missing_slots_for_proposal
+from .sort_keys import time_sort_minutes
 from .store import TeamTaskStore
 from .task_reconciler import apply_state_linked_update
+from .workflow_normalizer import normalize_new_proposal_graph
 
 
 DEFAULT_ACTORS = (
@@ -186,6 +189,7 @@ class TeamTaskOrchestrator:
                 outbound_messages=tuple(outbound),
             )
 
+        existing_proposals = self.store.list_proposals()
         if decision.proposal_drafts and _decision_contains_workflow_batch(decision):
             workflow_result = self._handle_workflow_proposal_drafts(
                 decision,
@@ -202,13 +206,30 @@ class TeamTaskOrchestrator:
             )
 
         for draft in decision.proposal_drafts:
+            explicit_relation = bool(draft.metadata.get(PARENT_PROPOSAL_ID_KEY) or draft.metadata.get("parent_source_key"))
             candidate = normalize_external_collaboration_candidate(
                 draft.to_candidate(),
                 message=message,
                 existing_proposals=existing_proposals,
             )
             proposal = proposal_from_candidate(candidate, message=message)
-            proposal, new_requests, new_outbound = apply_initial_policy(proposal, now=message.received_at)
+            normalization = normalize_new_proposal_graph(
+                existing_proposals,
+                (proposal,),
+                normalized_at=message.received_at,
+            )
+            self._persist_graph_normalization(normalization.updated_existing, message=message)
+            existing_proposals = _merge_existing_proposals(existing_proposals, normalization.updated_existing)
+            proposal = normalization.proposals[0]
+            if is_workflow_child(proposal) and (
+                explicit_relation or proposal.metadata.get("workflow_relation_normalized") == "true"
+            ):
+                proposal, new_requests, new_outbound = self._prepare_standalone_workflow_child(
+                    proposal,
+                    now=message.received_at,
+                )
+            else:
+                proposal, new_requests, new_outbound = apply_initial_policy(proposal, now=message.received_at)
             proposal, conflict_requests, conflict_outbound = apply_conflict_policy(
                 self.store,
                 proposal,
@@ -240,6 +261,7 @@ class TeamTaskOrchestrator:
                     occurred_at=message.received_at,
                 )
             proposals.append(proposal)
+            existing_proposals = (*existing_proposals, proposal)
             for request in new_requests:
                 self.store.save_approval_request(request)
                 self.store.append_event("approval.requested", {"request": request}, occurred_at=message.received_at)
@@ -273,6 +295,14 @@ class TeamTaskOrchestrator:
             base_proposals.append(proposal_from_candidate(candidate, message=message))
 
         resolved = resolve_same_batch_relation_metadata(tuple(base_proposals))
+        normalization = normalize_new_proposal_graph(
+            existing_proposals,
+            resolved,
+            normalized_at=message.received_at,
+        )
+        self._persist_graph_normalization(normalization.updated_existing, message=message)
+        existing_proposals = _merge_existing_proposals(existing_proposals, normalization.updated_existing)
+        resolved = normalization.proposals
         validation_errors = validate_workflow_relations(resolved, existing_proposals=existing_proposals)
         if validation_errors:
             self.store.append_event(
@@ -373,6 +403,24 @@ class TeamTaskOrchestrator:
             approval_requests=tuple(requests),
             outbound_messages=tuple(outbound),
         )
+
+    def _persist_graph_normalization(
+        self,
+        updated_existing: tuple[Proposal, ...],
+        *,
+        message: IncomingMessage,
+    ) -> None:
+        for updated in updated_existing:
+            self.store.save_proposal(updated)
+            self.store.append_event(
+                "workflow.graph_normalized",
+                {
+                    "proposal": updated,
+                    "message_id": message.message_id,
+                    "reason": updated.metadata.get("workflow_rename_reason", "relation_normalized"),
+                },
+                occurred_at=message.received_at,
+            )
 
     def _prepare_workflow_group(
         self,
@@ -826,10 +874,61 @@ class TeamTaskOrchestrator:
             {"proposal": updated, "actor_id": actor_id, "semantic_patch": patch.to_payload()},
             occurred_at=changed_at,
         )
+        related = self._complete_related_scheduled_commitments(
+            updated,
+            patch,
+            actor_id=actor_id,
+            changed_at=changed_at,
+        )
         return OrchestrationResult(
-            proposals=(updated,),
+            proposals=(updated, *related),
             outbound_messages=(_semantic_direct_update_message(updated, actor_id=actor_id),),
         )
+
+    def _complete_related_scheduled_commitments(
+        self,
+        completed: Proposal,
+        patch: ProposalPatch,
+        *,
+        actor_id: str,
+        changed_at: datetime,
+    ) -> tuple[Proposal, ...]:
+        if completed.kind != "event" or completed.scheduled_date is None:
+            return ()
+        related: list[Proposal] = []
+        for candidate in self.store.list_proposals():
+            if candidate.proposal_id == completed.proposal_id:
+                continue
+            if not _same_scheduled_commitment_slot(candidate, completed):
+                continue
+            if not _has_related_completion_signal(candidate, completed, patch):
+                continue
+            metadata = {
+                **candidate.metadata,
+                "completed_by": actor_id,
+                "completed_at": changed_at.isoformat(timespec="seconds"),
+                "completion_source": "semantic_linked_completion",
+                "linked_completion_source_proposal_id": completed.proposal_id,
+                "last_semantic_patch_actor_id": actor_id,
+                "last_semantic_patch_at": changed_at.isoformat(timespec="seconds"),
+                "last_semantic_patch_confidence": f"{patch.target_confidence:.2f}",
+                "last_semantic_patch_evidence": patch.evidence_text,
+                "last_state_linked_update_type": "semantic_linked_completion",
+            }
+            updated = replace(candidate, status="done", metadata=metadata, updated_at=changed_at)
+            self.store.save_proposal(updated)
+            self.store.append_event(
+                "proposal.completed",
+                {
+                    "proposal": updated,
+                    "actor_id": actor_id,
+                    "semantic_patch": patch.to_payload(),
+                    "linked_completion_source_proposal_id": completed.proposal_id,
+                },
+                occurred_at=changed_at,
+            )
+            related.append(updated)
+        return tuple(related)
 
     def _handle_direct_progress_patch(
         self,
@@ -1795,6 +1894,118 @@ def _semantic_direct_update_message(proposal: Proposal, *, actor_id: str) -> Out
     )
 
 
+_RELATED_COMPLETION_STOPWORDS = frozenset(
+    {
+        "일정",
+        "결정",
+        "진행",
+        "예정",
+        "확정",
+        "완료",
+        "관련",
+        "위에서",
+        "말한",
+        "해당",
+        "시각",
+        "회의",
+        "미팅",
+        "후속",
+        "자료",
+        "보고",
+        "정리",
+        "the",
+        "and",
+        "for",
+        "with",
+    }
+)
+
+
+def _same_scheduled_commitment_slot(candidate: Proposal, completed: Proposal) -> bool:
+    if candidate.kind != "event" or candidate.status not in {"approved", "applied", "awaiting_approval"}:
+        return False
+    if candidate.scheduled_date is None or candidate.scheduled_date != completed.scheduled_date:
+        return False
+    if candidate.time_window and completed.time_window:
+        return time_sort_minutes(candidate.time_window) == time_sort_minutes(completed.time_window)
+    return True
+
+
+def _has_related_completion_signal(candidate: Proposal, completed: Proposal, patch: ProposalPatch) -> bool:
+    if _explicitly_linked(candidate, completed):
+        return True
+    candidate_tokens = _completion_topic_tokens(
+        candidate.title,
+        candidate.raw_text,
+        *_metadata_topic_values(candidate),
+    )
+    completed_tokens = _completion_topic_tokens(
+        completed.title,
+        completed.raw_text,
+        patch.body,
+        patch.evidence_text,
+        *_metadata_topic_values(completed),
+    )
+    if len(candidate_tokens & completed_tokens) >= 2:
+        return True
+    if candidate.metadata.get("decision_pending") == "true" or candidate.metadata.get("date_resolution_policy"):
+        return bool(candidate_tokens & completed_tokens) and _shares_participant_hint(candidate, completed)
+    return False
+
+
+def _explicitly_linked(candidate: Proposal, completed: Proposal) -> bool:
+    return any(
+        value == completed.proposal_id
+        for value in (
+            candidate.metadata.get("parent_proposal_id", ""),
+            candidate.metadata.get("linked_completion_source_proposal_id", ""),
+        )
+    ) or any(
+        value == candidate.proposal_id
+        for value in (
+            completed.metadata.get("parent_proposal_id", ""),
+            completed.metadata.get("linked_completion_source_proposal_id", ""),
+        )
+    )
+
+
+def _metadata_topic_values(proposal: Proposal) -> tuple[str, ...]:
+    keys = (
+        "materials",
+        "external_participants",
+        "participant_label",
+        "external_owner",
+        "progress_note",
+        "previous_title",
+        "last_semantic_patch_evidence",
+    )
+    return tuple(proposal.metadata.get(key, "") for key in keys if proposal.metadata.get(key))
+
+
+def _completion_topic_tokens(*texts: str) -> set[str]:
+    tokens: set[str] = set()
+    for text in texts:
+        for token in re.findall(r"[0-9A-Za-z가-힣]+", text.lower()):
+            if token.isdigit() or len(token) < 2 or token in _RELATED_COMPLETION_STOPWORDS:
+                continue
+            tokens.add(token)
+    return tokens
+
+
+def _shares_participant_hint(candidate: Proposal, completed: Proposal) -> bool:
+    candidate_people = _completion_topic_tokens(
+        candidate.metadata.get("participants", ""),
+        candidate.metadata.get("external_participants", ""),
+        candidate.metadata.get("participant_label", ""),
+    )
+    completed_people = _completion_topic_tokens(
+        completed.metadata.get("participants", ""),
+        completed.metadata.get("external_participants", ""),
+        completed.metadata.get("participant_label", ""),
+    )
+    return bool(candidate_people & completed_people)
+
+
 def _state_update_message(proposal: Proposal, *, actor_id: str) -> OutboundMessage:
     if proposal.metadata.get("last_state_linked_update_type") == "natural_completion":
         return OutboundMessage(
@@ -2054,6 +2265,18 @@ def _decision_contains_workflow_batch(decision: OperatingAgentDecision) -> bool:
         if metadata.get(WORKFLOW_GROUP_ID_KEY) or metadata.get(STEP_INDEX_KEY):
             return True
     return False
+
+
+def _merge_existing_proposals(
+    existing: tuple[Proposal, ...],
+    updates: tuple[Proposal, ...],
+) -> tuple[Proposal, ...]:
+    if not updates:
+        return existing
+    by_id = {proposal.proposal_id: proposal for proposal in existing}
+    for update in updates:
+        by_id[update.proposal_id] = update
+    return tuple(by_id.values())
 
 
 def _child_needs_separate_workflow_approval(proposal: Proposal) -> bool:

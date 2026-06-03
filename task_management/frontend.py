@@ -17,6 +17,7 @@ from .relations import (
 from .sort_keys import proposal_deadline_sort_key
 from .store import TeamTaskStore
 from .timeline import proposal_timeline
+from .work_item_state import is_open_work_item, needs_time_resolution, work_item_urgency_label
 
 
 SURFACE_ROLES: dict[str, dict[str, str]] = {
@@ -133,6 +134,7 @@ def build_web_task_page_model(
     store: TeamTaskStore,
     *,
     today: date,
+    max_completed_children: int | None = None,
 ) -> dict[str, Any]:
     proposals = store.list_proposals()
     pending_requests = store.list_approval_requests(status="pending")
@@ -150,6 +152,7 @@ def build_web_task_page_model(
             [item for item in sorted_proposals if _belongs_in_today_section(item, today=today)],
             proposals=proposals,
             proposal_views=proposal_views,
+            max_completed_children=max_completed_children,
         ),
         "this_week": _hierarchy_section(
             [
@@ -161,19 +164,22 @@ def build_web_task_page_model(
             ],
             proposals=proposals,
             proposal_views=proposal_views,
+            max_completed_children=max_completed_children,
         ),
         "pending_approvals": [_request_view(request, proposals) for request in pending_requests],
-        "questions": _hierarchy_section([item for item in sorted_proposals if item.kind == "question"], proposals=proposals, proposal_views=proposal_views),
+        "questions": _hierarchy_section([item for item in sorted_proposals if item.kind == "question"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
         "floating": _hierarchy_section(
             [item for item in sorted_proposals if item.status in {"draft", "posted", "awaiting_approval"} or item.missing_slots],
             proposals=proposals,
             proposal_views=proposal_views,
+            max_completed_children=max_completed_children,
         ),
-        "routines": _hierarchy_section([item for item in sorted_proposals if item.kind == "routine"], proposals=proposals, proposal_views=proposal_views),
+        "routines": _hierarchy_section([item for item in sorted_proposals if item.kind == "routine"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
         "prep_subtasks": _hierarchy_section(
             [item for item in sorted_proposals if item.metadata.get("link_type") == "prep_subtask"],
             proposals=proposals,
             proposal_views=proposal_views,
+            max_completed_children=max_completed_children,
         ),
         "reminders": [
             {
@@ -185,12 +191,13 @@ def build_web_task_page_model(
             for event in events
             if str(event.get("type", "")).startswith("reminder.")
         ],
-        "references": _hierarchy_section([item for item in sorted_proposals if item.kind == "reference"], proposals=proposals, proposal_views=proposal_views),
+        "references": _hierarchy_section([item for item in sorted_proposals if item.kind == "reference"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
         "by_assignee": _by_assignee(proposals, applied_exports, today=today),
         "done": _hierarchy_section(
             [item for item in sorted_proposals if item.status in {"done", "applied"}],
             proposals=proposals,
             proposal_views=proposal_views,
+            max_completed_children=max_completed_children,
         ),
     }
     status_counts = _status_counts(proposals)
@@ -972,19 +979,17 @@ def _proposal_date(proposal: Proposal) -> date | None:
 
 
 def _belongs_in_today_section(proposal: Proposal, *, today: date) -> bool:
-    return (_is_open_status(proposal) and _proposal_date(proposal) == today) or _is_open_overdue(proposal, today=today)
+    return (is_open_work_item(proposal) and _proposal_date(proposal) == today) or _is_open_overdue(proposal, today=today)
 
 
 def _is_open_status(proposal: Proposal) -> bool:
-    return proposal.status not in {"done", "rejected"}
+    return is_open_work_item(proposal)
 
 
 def _is_open_overdue(proposal: Proposal, *, today: date) -> bool:
     return (
         proposal.status in {"approved", "applied", "awaiting_approval"}
-        and proposal.kind in {"task", "question"}
-        and proposal.due_date is not None
-        and proposal.due_date < today
+        and needs_time_resolution(proposal, today=today)
         and not has_deferred_missing_info(proposal)
     )
 
@@ -992,8 +997,7 @@ def _is_open_overdue(proposal: Proposal, *, today: date) -> bool:
 def _is_overdue(proposal: Proposal, *, today: date) -> bool:
     return (
         proposal.status in {"draft", "posted", "awaiting_approval", "approved", "applied"}
-        and proposal.due_date is not None
-        and proposal.due_date < today
+        and needs_time_resolution(proposal, today=today)
         and not has_deferred_missing_info(proposal)
     )
 
@@ -1011,7 +1015,9 @@ def _proposal_view(
     conflict_ids = proposal.metadata.get("conflict_with_proposal_ids", "")
     if not conflict_ids and proposal.metadata.get("conflict_detected") == "true":
         conflict_ids = "충돌 확인 필요"
-    is_overdue = _is_overdue(proposal, today=today)
+    is_container = _is_workflow_context_parent(proposal)
+    is_overdue = _is_overdue(proposal, today=today) and not _suppress_parent_overdue(proposal, proposals)
+    urgency_label = work_item_urgency_label(proposal, today=today) if is_overdue else ""
     projection = workflow_projection(proposal, proposals) if proposals and is_workflow_parent(proposal, proposals) else None
     timeline = proposal_timeline(events, proposals, proposal_id=proposal.proposal_id) if events and proposals else ()
     view: dict[str, Any] = {
@@ -1023,11 +1029,11 @@ def _proposal_view(
         "kind": proposal.kind,
         "assigned_to": proposal.assigned_to,
         "task_management_area": proposal.task_management_area,
-        "date": proposal_date.isoformat() if proposal_date else "",
-        "date_label": date_label(proposal_date) if proposal_date else "",
+        "date": "" if is_container else proposal_date.isoformat() if proposal_date else "",
+        "date_label": "" if is_container else date_label(proposal_date) if proposal_date else "",
         "is_overdue": "true" if is_overdue else "",
-        "urgency_label": "마감 지남" if is_overdue else "",
-        "time_window": proposal.time_window,
+        "urgency_label": urgency_label,
+        "time_window": "" if is_container else proposal.time_window,
         "date_window": _date_window_label(proposal),
         "date_window_kind": proposal.metadata.get("date_window_kind", ""),
         "missing_slots": ", ".join(proposal.missing_slots),
@@ -1052,6 +1058,9 @@ def _proposal_view(
         "remaining_work": proposal.metadata.get("remaining_work", ""),
         "progress_updated_at": proposal.metadata.get("progress_updated_at", ""),
         "children": [],
+        "child_total_count": 0,
+        "child_done_count": 0,
+        "hidden_completed_child_count": 0,
         "timeline": [entry.to_view() for entry in timeline],
     }
     return view
@@ -1088,21 +1097,92 @@ def _hierarchy_section(
     *,
     proposals: tuple[Proposal, ...],
     proposal_views: dict[str, dict[str, Any]],
+    max_completed_children: int | None = None,
 ) -> list[dict[str, Any]]:
     visible_ids = {proposal.proposal_id for proposal in section_proposals}
+    proposals_by_id = {proposal.proposal_id: proposal for proposal in proposals}
     result: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for proposal in section_proposals:
-        parent_id = parent_proposal_id(proposal)
-        if parent_id and parent_id in visible_ids:
+        anchor = _section_anchor(proposal, proposals_by_id, visible_ids)
+        if anchor.proposal_id in seen:
             continue
-        item = dict(proposal_views[proposal.proposal_id])
+        seen.add(anchor.proposal_id)
+        item = dict(proposal_views[anchor.proposal_id])
+        all_children = child_proposals(anchor, proposals)
+        children_to_render = _display_children(all_children, max_completed_children=max_completed_children)
         children = [
             dict(proposal_views[child.proposal_id])
-            for child in child_proposals(proposal, proposals)
+            for child in children_to_render
         ]
         item["children"] = children
+        item["child_total_count"] = len(all_children)
+        item["child_done_count"] = _completed_proposal_count(all_children)
+        item["hidden_completed_child_count"] = max(0, _completed_proposal_count(all_children) - _completed_proposal_count(children_to_render))
         result.append(item)
     return result
+
+
+def _section_anchor(
+    proposal: Proposal,
+    proposals_by_id: dict[str, Proposal],
+    visible_ids: set[str],
+) -> Proposal:
+    current = proposal
+    anchor: Proposal | None = None
+    seen: set[str] = set()
+    while True:
+        parent_id = parent_proposal_id(current)
+        parent = proposals_by_id.get(parent_id) if parent_id else None
+        if parent is None or parent.proposal_id in seen:
+            break
+        seen.add(parent.proposal_id)
+        if parent.proposal_id in visible_ids or _is_workflow_context_parent(parent):
+            anchor = parent
+        current = parent
+    return anchor or proposal
+
+
+def _display_children(
+    children: tuple[Proposal, ...],
+    *,
+    max_completed_children: int | None,
+) -> tuple[Proposal, ...]:
+    if max_completed_children is None:
+        return children
+    completed = [child for child in children if child.status in {"done", "applied"}]
+    if len(completed) <= max_completed_children:
+        return children
+    recent_completed_ids = {
+        child.proposal_id
+        for child in sorted(completed, key=_completion_sort_key, reverse=True)[:max_completed_children]
+    }
+    return tuple(
+        child
+        for child in children
+        if child.status not in {"done", "applied"} or child.proposal_id in recent_completed_ids
+    )
+
+
+def _completed_proposal_count(proposals: tuple[Proposal, ...]) -> int:
+    return sum(1 for proposal in proposals if proposal.status in {"done", "applied"})
+
+
+def _completion_sort_key(proposal: Proposal) -> tuple[str, str]:
+    completed_at = proposal.metadata.get("completed_at", "")
+    updated_at = proposal.updated_at.isoformat(timespec="seconds") if proposal.updated_at else ""
+    created_at = proposal.created_at.isoformat(timespec="seconds") if proposal.created_at else ""
+    return (completed_at or updated_at or created_at, proposal.proposal_id)
+
+
+def _is_workflow_context_parent(proposal: Proposal) -> bool:
+    return proposal.metadata.get("workflow_container") == "true" or proposal.metadata.get("workflow_role") == "parent"
+
+
+def _suppress_parent_overdue(proposal: Proposal, proposals: tuple[Proposal, ...]) -> bool:
+    if not _is_workflow_context_parent(proposal):
+        return False
+    return bool(child_proposals(proposal, proposals))
 
 
 def _status_counts(proposals: tuple[Proposal, ...]) -> dict[str, int]:
@@ -1261,9 +1341,10 @@ def _proposal_row(item: dict[str, Any], *, scope: str, child: bool = False) -> s
         pills.append(_pill(f"막힘 {item['blocking_dependencies']}", "danger"))
     children = list(item.get("children", []))
     if children:
-        done_count = _completed_child_count(children)
-        pill_class = "ok" if done_count == len(children) else "warn"
-        pills.append(_pill(f"하위작업 {done_count}/{len(children)} 완료", pill_class))
+        done_count = int(item.get("child_done_count") or _completed_child_count(children))
+        total_count = int(item.get("child_total_count") or len(children))
+        pill_class = "ok" if done_count == total_count else "warn"
+        pills.append(_pill(f"하위작업 {done_count}/{total_count} 완료", pill_class))
     child_class = " task-child-row" if child else ""
     child_rows = "".join(
         _proposal_row(child_item, scope=f"{scope}-child", child=True)
@@ -1271,7 +1352,7 @@ def _proposal_row(item: dict[str, Any], *, scope: str, child: bool = False) -> s
     )
     children_html = (
         f'<div class="task-children"><div class="task-children-label">'
-        f'{escape(_children_summary_label(children))}</div>{child_rows}</div>'
+        f'{escape(_children_summary_label(item, children))}</div>{child_rows}</div>'
         if child_rows
         else ""
     )
@@ -1290,15 +1371,18 @@ def _completed_child_count(children: list[dict[str, Any]]) -> int:
     return sum(1 for child in children if child.get("status") in {"done", "applied"})
 
 
-def _children_summary_label(children: list[dict[str, Any]]) -> str:
-    done_count = _completed_child_count(children)
+def _children_summary_label(parent: dict[str, Any], children: list[dict[str, Any]]) -> str:
+    done_count = int(parent.get("child_done_count") or _completed_child_count(children))
     next_child = next((child for child in children if child.get("status") not in {"done", "applied", "rejected"}), None)
     if next_child:
         step = str(next_child.get("step_label") or "")
         next_label = f" · 다음 {step}" if step else ""
     else:
         next_label = ""
-    return f"하위작업 {done_count}/{len(children)} 완료{next_label}"
+    total_count = int(parent.get("child_total_count") or len(children))
+    hidden_count = int(parent.get("hidden_completed_child_count") or 0)
+    hidden_label = f" · 완료 {hidden_count}개 숨김" if hidden_count else ""
+    return f"하위작업 {done_count}/{total_count} 완료{next_label}{hidden_label}"
 
 
 def _pill(text: str, klass: str = "") -> str:

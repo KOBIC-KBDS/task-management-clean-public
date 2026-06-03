@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeBoarding - task-management-public-release</title>
+<style>
+:root { color-scheme: light; --bg:#f7f8fb; --card:#fff; --ink:#152033; --muted:#667085; --line:#d8dee9; --accent:#2251d1; }
+body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
+header { padding:28px 36px; background:linear-gradient(135deg,#14213d,#275efe); color:white; }
+header h1 { margin:0 0 8px; font-size:28px; }
+header p { margin:0; opacity:.88; }
+main { max-width:1180px; margin:0 auto; padding:24px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; margin:0 0 18px; box-shadow:0 2px 8px rgba(16,24,40,.04); }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; }
+.kv { display:flex; justify-content:space-between; gap:12px; border-bottom:1px dashed var(--line); padding:8px 0; }
+.kv span:first-child { color:var(--muted); }
+a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+pre { white-space:pre-wrap; overflow:auto; background:#0b1020; color:#e6edf3; padding:14px; border-radius:12px; font-size:12px; line-height:1.45; }
+.mermaid { background:white; color:#111827; border:1px solid var(--line); padding:12px; border-radius:12px; overflow:auto; }
+details summary { cursor:pointer; color:var(--accent); font-weight:600; margin:8px 0; }
+.small { color:var(--muted); font-size:13px; }
+</style>
+</head><body>
+<header><h1>CodeBoarding: task-management-public-release</h1><p>Generated project map for the clean public task-management repository.</p></header>
+<main>
+<section class="card"><h2>Generation summary</h2>
+<div class="kv"><span>Target repo</span><strong>&lt;repo-root&gt;</strong></div>
+<div class="kv"><span>Generated At</span><strong>2026-06-03T08:43:17Z</strong></div>
+</section>
+<section class="card"><h2>Artifacts</h2><div class="grid">
+<div><a href="README.md">README.md</a></div>
+<div><a href="architecture.md">architecture.md</a></div>
+<div><a href="module-map.md">module-map.md</a></div>
+<div><a href="runtime-flow.md">runtime-flow.md</a></div>
+<div><a href="data-flow.md">data-flow.md</a></div>
+<div><a href="inventory.json">inventory.json</a></div>
+<div><a href="diagrams/overview.mmd">diagrams/overview.mmd</a></div>
+<div><a href="diagrams/module-dependencies.mmd">diagrams/module-dependencies.mmd</a></div>
+<div><a href="diagrams/runtime-flow.mmd">diagrams/runtime-flow.mmd</a></div>
+<div><a href="diagrams/data-flow.mmd">diagrams/data-flow.mmd</a></div>
+</div></section>
+<section class="card"><h2>Rendered diagrams</h2><p class="small">Mermaid rendering uses CDN in the browser; raw sources remain linked and embedded below.</p></section>
+<section class="card"><h3>System overview</h3>
+<pre class="mermaid">flowchart TD
+  repo[&quot;task-management-public-release&quot;]
+  module_task_management[&quot;task_management (50 files)&quot;]
+  repo --&gt; module_task_management
+  module_tests[&quot;tests (27 files)&quot;]
+  repo --&gt; module_tests
+  module_docs[&quot;docs (13 files)&quot;]
+  repo --&gt; module_docs
+  module_ops[&quot;ops (12 files)&quot;]
+  repo --&gt; module_ops
+  module_example_task_management_egg_info[&quot;example_task_management.egg-info (6 files)&quot;]
+  repo --&gt; module_example_task_management_egg_info
+  module_examples[&quot;examples (5 files)&quot;]
+  repo --&gt; module_examples
+  module_gitignore[&quot;.gitignore (1 files)&quot;]
+  repo --&gt; module_gitignore
+  module_AGENTS_md[&quot;AGENTS.md (1 files)&quot;]
+  repo --&gt; module_AGENTS_md
+  module_CLAUDE_md[&quot;CLAUDE.md (1 files)&quot;]
+  repo --&gt; module_CLAUDE_md
+  module_PUBLIC_RELEASE_NOTES_md[&quot;PUBLIC_RELEASE_NOTES.md (1 files)&quot;]
+  repo --&gt; module_PUBLIC_RELEASE_NOTES_md
+</pre>
+<details><summary>Raw Mermaid: diagrams/overview.mmd</summary><pre>flowchart TD
+  repo[&quot;task-management-public-release&quot;]
+  module_task_management[&quot;task_management (50 files)&quot;]
+  repo --&gt; module_task_management
+  module_tests[&quot;tests (27 files)&quot;]
+  repo --&gt; module_tests
+  module_docs[&quot;docs (13 files)&quot;]
+  repo --&gt; module_docs
+  module_ops[&quot;ops (12 files)&quot;]
+  repo --&gt; module_ops
+  module_example_task_management_egg_info[&quot;example_task_management.egg-info (6 files)&quot;]
+  repo --&gt; module_example_task_management_egg_info
+  module_examples[&quot;examples (5 files)&quot;]
+  repo --&gt; module_examples
+  module_gitignore[&quot;.gitignore (1 files)&quot;]
+  repo --&gt; module_gitignore
+  module_AGENTS_md[&quot;AGENTS.md (1 files)&quot;]
+  repo --&gt; module_AGENTS_md
+  module_CLAUDE_md[&quot;CLAUDE.md (1 files)&quot;]
+  repo --&gt; module_CLAUDE_md
+  module_PUBLIC_RELEASE_NOTES_md[&quot;PUBLIC_RELEASE_NOTES.md (1 files)&quot;]
+  repo --&gt; module_PUBLIC_RELEASE_NOTES_md
+</pre></details>
+</section>
+<section class="card"><h3>Module dependencies</h3>
+<pre class="mermaid">flowchart LR
+  src_tests[&quot;tests&quot;] --&gt;|26| dst_task_management[&quot;task_management&quot;]
+</pre>
+<details><summary>Raw Mermaid: diagrams/module-dependencies.mmd</summary><pre>flowchart LR
+  src_tests[&quot;tests&quot;] --&gt;|26| dst_task_management[&quot;task_management&quot;]
+</pre></details>
+</section>
+<section class="card"><h3>Runtime flow</h3>
+<pre class="mermaid">flowchart TD
+  user[&quot;User / automation&quot;]
+  entry_0[&quot;python-project-script: task-management&quot;]
+  user --&gt; entry_0
+</pre>
+<details><summary>Raw Mermaid: diagrams/runtime-flow.mmd</summary><pre>flowchart TD
+  user[&quot;User / automation&quot;]
+  entry_0[&quot;python-project-script: task-management&quot;]
+  user --&gt; entry_0
+</pre></details>
+</section>
+<section class="card"><h3>Data flow</h3>
+<pre class="mermaid">flowchart LR
+  code[&quot;Repository source&quot;]
+  inventory[&quot;Static inventory JSON&quot;]
+  docs[&quot;Markdown + Mermaid outputs&quot;]
+  code --&gt; inventory --&gt; docs
+  skipped[&quot;Skipped secret/runtime-like paths&quot;] -. excluded .-&gt; inventory
+</pre>
+<details><summary>Raw Mermaid: diagrams/data-flow.mmd</summary><pre>flowchart LR
+  code[&quot;Repository source&quot;]
+  inventory[&quot;Static inventory JSON&quot;]
+  docs[&quot;Markdown + Mermaid outputs&quot;]
+  code --&gt; inventory --&gt; docs
+  skipped[&quot;Skipped secret/runtime-like paths&quot;] -. excluded .-&gt; inventory
+</pre></details>
+</section>
+<section class="card"><h2>Document previews</h2></section>
+<section class="card"><h3>README <span class="small">(README.md)</span></h3><pre># Codeboarding Outputs: task-management-public-release
+
+- Target repo: `&lt;repo-root&gt;`
+- Output directory: `docs/codeboarding`
+- Generated at: `2026-06-03T08:43:17Z`
+- Evidence source: deterministic static scan by `repo_inventory.py`
+
+## Start Here
+
+1. Read `architecture.md` for the high-level inventory and overview diagram.
+2. Read `module-map.md` for package/module evidence and cheap import edges.
+3. Read `runtime-flow.md` for manifest/config entrypoints.
+4. Read `data-flow.md` for inventory-generation flow and safety exclusions.
+5. Use `inventory.json` as the machine-readable source for follow-up Codex synthesis.
+
+## Files
+
+```text
+docs/codeboarding/
+  README.md
+  architecture.md
+  module-map.md
+  runtime-flow.md
+  data-flow.md
+  inventory.json
+  diagrams/
+    overview.mmd
+    module-dependencies.mmd
+    runtime-flow.mmd
+    data-flow.mmd
+```
+
+## Viewing
+
+- Markdown files contain inline Mermaid fenced diagrams.
+- GitHub/GitLab render Mermaid diagrams when these Markdown files are viewed there.
+- Local Markdown viewers may need Mermaid support enabled or an extension.
+- Standalone diagrams live under `diagrams/*.mmd`.
+
+Optional Mermaid CLI render:
+
+```bash
+cd &lt;repo-root&gt;
+npx -y @mermaid-js/mermaid-cli \
+  -i docs/codeboarding/diagrams/overview.mmd \
+  -o docs/codeboarding/diagrams/overview.svg
+open docs/codeboarding/diagrams/overview.svg
+```
+
+`npx` is optional and may fetch packages on first use. The inventory script itself
+uses only the Python standard library.
+
+## Evidence vs. Inference
+
+- `inventory.json`, file counts, important configs, entrypoints, and cheap import
+  edges are static evidence.
+- Architecture or runtime claims beyond those facts require follow-up Codex
+  synthesis and should be labeled as inference.
+- Skipped secret/runtime-like paths were intentionally not read.</pre></section>
+<section class="card"><h3>Architecture <span class="small">(architecture.md)</span></h3><pre># Architecture Inventory: task-management-public-release
+
+- Target repo: `&lt;repo-root&gt;`
+- Generated at: `2026-06-03T08:43:17Z`
+- Evidence source: deterministic static scan by `repo_inventory.py`
+
+## Overview Diagram
+
+```mermaid
+flowchart TD
+  repo[&quot;task-management-public-release&quot;]
+  module_task_management[&quot;task_management (50 files)&quot;]
+  repo --&gt; module_task_management
+  module_tests[&quot;tests (27 files)&quot;]
+  repo --&gt; module_tests
+  module_docs[&quot;docs (13 files)&quot;]
+  repo --&gt; module_docs
+  module_ops[&quot;ops (12 files)&quot;]
+  repo --&gt; module_ops
+  module_example_task_management_egg_info[&quot;example_task_management.egg-info (6 files)&quot;]
+  repo --&gt; module_example_task_management_egg_info
+  module_examples[&quot;examples (5 files)&quot;]
+  repo --&gt; module_examples
+  module_gitignore[&quot;.gitignore (1 files)&quot;]
+  repo --&gt; module_gitignore
+  module_AGENTS_md[&quot;AGENTS.md (1 files)&quot;]
+  repo --&gt; module_AGENTS_md
+  module_CLAUDE_md[&quot;CLAUDE.md (1 files)&quot;]
+  repo --&gt; module_CLAUDE_md
+  module_PUBLIC_RELEASE_NOTES_md[&quot;PUBLIC_RELEASE_NOTES.md (1 files)&quot;]
+  repo --&gt; module_PUBLIC_RELEASE_NOTES_md
+```
+
+## Evidence Summary
+
+| Item | Value |
+| --- | --- |
+| Files scanned | 120 |
+| Skipped paths | 13 |
+| Entrypoints detected | 1 |
+| Cheap dependency edges | 522 |
+
+
+## Top-level Modules
+
+| Item | Value |
+| --- | --- |
+| task_management | 50 files |
+| tests | 27 files |
+| docs | 13 files |
+| ops | 12 files |
+| example_task_management.egg-info | 6 files |
+| examples | 5 files |
+| .gitignore | 1 files |
+| AGENTS.md | 1 files |
+| CLAUDE.md | 1 files |
+| PUBLIC_RELEASE_NOTES.md | 1 files |
+| README.md | 1 files |
+| pyproject.toml | 1 files |
+
+
+## Languages
+
+| Item | Value |
+| --- | --- |
+| HTML | 3 |
+| JSON | 4 |
+| Markdown | 17 |
+| Python | 77 |
+| Shell | 1 |
+| TOML | 1 |
+
+
+## Important Config Files
+
+| Item | Value |
+| --- | --- |
+| .codex/skills/slack-canvas-task-page/SKILL.md | config/evidence |
+| AGENTS.md | config/evidence |
+| README.md | config/evidence |
+...
+(15 more lines; open architecture.md)</pre></section>
+<section class="card"><h3>Module map <span class="small">(module-map.md)</span></h3><pre># Module Map: task-management-public-release
+
+- Target repo: `&lt;repo-root&gt;`
+- Generated at: `2026-06-03T08:43:17Z`
+- Evidence source: deterministic static scan by `repo_inventory.py`
+
+## Module Dependency Diagram
+
+```mermaid
+flowchart LR
+  src_tests[&quot;tests&quot;] --&gt;|26| dst_task_management[&quot;task_management&quot;]
+```
+
+## Python First-party Roots
+
+| Item | Value |
+| --- | --- |
+| task_management | first-party import root |
+
+
+## Python Packages
+
+| Item | Value |
+| --- | --- |
+| task_management | task_management |
+
+
+## Cheap Import Edges
+
+| Item | Value |
+| --- | --- |
+| `task_management/__init__.py` | discussion_adapter (python-from-import, internal=False) |
+| `task_management/__init__.py` | claude_code_operating_agent (python-from-import, internal=False) |
+| `task_management/__init__.py` | codex_operating_agent (python-from-import, internal=False) |
+| `task_management/__init__.py` | export_service (python-from-import, internal=False) |
+| `task_management/__init__.py` | frontend (python-from-import, internal=False) |
+| `task_management/__init__.py` | kakao_export_adapter (python-from-import, internal=False) |
+| `task_management/__init__.py` | openai_operating_agent (python-from-import, internal=False) |
+| `task_management/__init__.py` | operating_agent (python-from-import, internal=False) |
+| `task_management/__init__.py` | orchestrator (python-from-import, internal=False) |
+| `task_management/__init__.py` | simulator (python-from-import, internal=False) |
+| `task_management/__init__.py` | slack_adapter (python-from-import, internal=False) |
+| `task_management/__init__.py` | slack_cycle (python-from-import, internal=False) |
+| `task_management/__init__.py` | slack_digest (python-from-import, internal=False) |
+| `task_management/__init__.py` | task_reconciler (python-from-import, internal=False) |
+| `task_management/__init__.py` | task_core_bridge (python-from-import, internal=False) |
+| `task_management/approval_policy.py` | __future__ (python-from-import, internal=False) |
+| `task_management/approval_policy.py` | dataclasses (python-from-import, internal=False) |
+| `task_management/approval_policy.py` | datetime (python-from-import, internal=False) |
+| `task_management/approval_policy.py` | hashlib (python-import, internal=False) |
+| `task_management/approval_policy.py` | domain (python-from-import, internal=False) |
+| `task_management/approval_policy.py` | human_view (python-from-import, internal=False) |
+| `task_management/approval_policy.py` | slot_validator (python-from-import, internal=False) |
+| `task_management/approval_policy.py` | relations (python-from-import, internal=False) |
+| `task_management/attention.py` | __future__ (python-from-import, internal=False) |
+| `task_management/attention.py` | dataclasses (python-from-import, internal=False) |
+| `task_management/attention.py` | datetime (python-from-import, internal=False) |
+| `task_management/attention.py` | typing (python-from-import, internal=False) |
+| `task_management/attention.py` | domain (python-from-import, internal=False) |
+| `task_management/attention.py` | relations (python-from-import, internal=False) |
+| `task_management/backfill_report.py` | __future__ (python-from-import, internal=False) |
+| `task_management/backfill_report.py` | dataclasses (python-from-import, internal=False) |
+| `task_management/backfill_report.py` | datetime (python-from-import, internal=False) |
+| `task_management/backfill_report.py` | json (python-import, internal=False) |
+| `task_management/backfill_report.py` | pathlib (python-from-import, internal=False) |
+| `task_management/backfill_report.py` | typing (python-from-import, internal=False) |
+| `task_management/backfill_report.py` | domain (python-from-import, internal=False) |
+| `task_management/chat_adapter.py` | __future__ (python-from-import, internal=False) |
+| `task_management/chat_adapter.py` | typing (python-from-import, internal=False) |
+| `task_management/chat_adapter.py` | domain (python-from-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | __future__ (python-from-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | dataclasses (python-from-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | json (python-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | os (python-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | pathlib (python-from-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | shutil (python-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | subprocess (python-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | typing (python-from-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | domain (python-from-import, internal=False) |
+| `task_management/claude_code_operating_agent.py` | operating_agent (python-from-import, internal=False) |
+...
+(23 more lines; open module-map.md)</pre></section>
+<section class="card"><h3>Runtime flow notes <span class="small">(runtime-flow.md)</span></h3><pre># Runtime Flow: task-management-public-release
+
+- Target repo: `&lt;repo-root&gt;`
+- Generated at: `2026-06-03T08:43:17Z`
+- Evidence source: manifest/config entrypoint scan by `repo_inventory.py`
+
+## Runtime Entrypoint Diagram
+
+```mermaid
+flowchart TD
+  user[&quot;User / automation&quot;]
+  entry_0[&quot;python-project-script: task-management&quot;]
+  user --&gt; entry_0
+```
+
+## Detected Entrypoints
+
+| Item | Value |
+| --- | --- |
+| python-project-script: task-management | `task_management.cli:main` from `pyproject.toml` |
+
+
+## Inference Notes
+
+- Runtime flow is inferred from manifests and config files only.
+- This pass does not execute the application or inspect deployment runtime state.
+
+## Known Gaps
+
+- This first pass does not execute the application.
+- Framework routing, background jobs, and deployment-specific behavior require follow-up evidence.
+- Runtime confidence details are recorded in `inventory.json` under `analysis_limits.runtime_entrypoints`.</pre></section>
+<section class="card"><h3>Data flow notes <span class="small">(data-flow.md)</span></h3><pre># Data Flow: task-management-public-release
+
+- Target repo: `&lt;repo-root&gt;`
+- Generated at: `2026-06-03T08:43:17Z`
+- Evidence source: deterministic static scan by `repo_inventory.py`
+
+## Inventory Data Flow
+
+```mermaid
+flowchart LR
+  code[&quot;Repository source&quot;]
+  inventory[&quot;Static inventory JSON&quot;]
+  docs[&quot;Markdown + Mermaid outputs&quot;]
+  code --&gt; inventory --&gt; docs
+  skipped[&quot;Skipped secret/runtime-like paths&quot;] -. excluded .-&gt; inventory
+```
+
+## Safety Exclusions
+
+| Item | Value |
+| --- | --- |
+| .git/ | skipped |
+| .pytest_cache/ | skipped |
+| .env.example | skipped |
+| .state-md/task_management.sqlite3 | skipped |
+| docs/codeboarding/ | skipped |
+| docs/screenshots/slack-app-settings/01-app-token-1-generate.png | skipped |
+| docs/screenshots/slack-app-settings/01-app-token-2-scope.png | skipped |
+| docs/screenshots/slack-app-settings/01-app-token-3-copy.png | skipped |
+| docs/screenshots/slack-app-settings/05-install-2-token.png | skipped |
+| ops/com.example.task-management.slack-secretary.plist.template | skipped |
+| ops/slack-secretary-supervisor.sh | skipped |
+| task_management/secretary.py | skipped |
+| tests/test_proactive_secretary.py | skipped |
+
+
+## Inference Notes
+
+- This document describes the inventory-generation data flow, not the target application&#x27;s business data flow.
+- Any application-level data-flow claims require a follow-up semantic pass grounded in safe source files.
+
+## Known Gaps
+
+- Application-level data stores and business data flows require a targeted semantic pass.
+- Secret-like and runtime-state paths are intentionally excluded from generated documentation.</pre></section>
+</main>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: true, securityLevel: 'loose', theme: 'default' });
+</script>
+</body></html>

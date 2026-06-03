@@ -167,6 +167,8 @@ def test_codex_cli_operating_agent_uses_login_session_contract_without_api_key()
     assert "step_index" in runner.prompts[0]
     assert "workflow_id" in runner.prompts[0]
     assert "completion_scope=preparation|materials|subtask" in runner.prompts[0]
+    assert "stable workflow root" in runner.prompts[0]
+    assert "Post-event deliverables" in runner.prompts[0]
 
 
 def test_orchestrator_commits_codex_agent_draft_through_core_policy(tmp_path: Path) -> None:

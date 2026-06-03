@@ -469,6 +469,18 @@ def queue_slack_outbound(
             continue
         dedupe_key = _outbound_dedupe_key(message, recipient_id=recipient_id)
         if store.has_outbound_delivery(dedupe_key):
+            store.append_event(
+                "slack.message.skipped",
+                {
+                    "reason": "duplicate_dedupe_key",
+                    "dedupe_key": dedupe_key,
+                    "message_type": message.message_type,
+                    "proposal_id": message.proposal_id,
+                    "approval_request_id": message.approval_request_id,
+                    "recipient_id": recipient_id,
+                },
+                occurred_at=queued_at,
+            )
             continue
         inserted = store.enqueue_outbound_message(
             dedupe_key=dedupe_key,
