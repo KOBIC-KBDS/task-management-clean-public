@@ -301,8 +301,27 @@ async def run_slack_socket_loop(
                 envelope=envelope,
                 received_at=datetime.now(),
             )
+            ack_failed = False
             if envelope_id:
-                await client.ack(envelope_id)
+                try:
+                    await client.ack(envelope_id)
+                except Exception as exc:
+                    # The Socket Mode WebSocket dropped mid-ack. Outbound replies go
+                    # through the Slack Web API (not this socket), so keep processing
+                    # the queue to deliver the reply, then reconnect instead of
+                    # crashing. Slack redelivers the unacked envelope on reconnect and
+                    # inbound dedupe prevents double-processing.
+                    ack_failed = True
+                    store.append_event(
+                        "slack.socket.ack.failed",
+                        {
+                            "envelope_id": envelope_id,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc)[:500],
+                            "reconnect": reconnect,
+                        },
+                        occurred_at=datetime.now(),
+                    )
             event_count += 1
             processed = process_slack_socket_inbound_queue(
                 store=store,
@@ -321,6 +340,9 @@ async def run_slack_socket_loop(
                     result_count += 1
                     outbound_count += len(event_result.outbound_messages)
 
+            if ack_failed:
+                socket_closed_reason = "ack_failed"
+                break
             if max_events and event_count >= max_events:
                 stopped_reason = "max_events"
                 break
