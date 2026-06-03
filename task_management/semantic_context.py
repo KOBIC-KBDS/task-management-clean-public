@@ -31,6 +31,8 @@ def build_operating_agent_context(
 
     pending_requests = tuple(pending_approval_requests)
     request_ids_by_proposal = _request_ids_by_proposal(pending_requests)
+    message_payload = _json_safe(message)
+    recent_conversation = message_payload.pop("recent_conversation", [])
     return {
         "schema": OPERATING_AGENT_SCHEMA,
         "semantic_contract": {
@@ -43,7 +45,8 @@ def build_operating_agent_context(
         },
         "today": message.received_at.date().isoformat(),
         "timezone": "Asia/Seoul",
-        "message": _json_safe(message),
+        "message": message_payload,
+        "recent_conversation": recent_conversation,
         "pending_approval_requests": [_json_safe(item) for item in pending_requests],
         "pending_proposals": [_json_safe(item) for item in pending_proposals],
         "pending_proposal_cards": [

@@ -75,6 +75,10 @@ class IncomingMessage:
     visibility: MessageVisibility
     text: str
     received_at: datetime
+    # Recent DM turns (user + bot), most recent last, so the semantic agent can
+    # resolve a reply against the prior conversation (e.g. an affirmative answer to
+    # the bot's own pending question). Optional; defaults to empty for all callers.
+    recent_conversation: tuple = ()
 
 
 @dataclass(frozen=True)

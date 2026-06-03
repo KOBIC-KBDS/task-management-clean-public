@@ -123,6 +123,14 @@ class TeamTaskOrchestrator:
             approver_id=message.sender_id,
             status="pending",
         )
+        message = replace(
+            message,
+            recent_conversation=_recent_conversation_from_events(
+                self.store.read_events(),
+                chat_id=message.chat_id,
+                sender_id=message.sender_id,
+            ),
+        )
         decision = self.operating_agent.decide(
             message,
             pending_approval_requests=pending_approval_requests,
@@ -1435,7 +1443,7 @@ class TeamTaskOrchestrator:
                     _team_message(
                         updated[0],
                         message_type="workflow_group_approved",
-                        text=f"연속 작업 묶음을 확정했습니다: {updated[0].title}",
+                        text=f"'{updated[0].title}' 묶음을 등록했습니다.",
                     ),
                 ),
             )
@@ -2285,6 +2293,36 @@ def _child_needs_separate_workflow_approval(proposal: Proposal) -> bool:
 
 def _split_csv(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _recent_conversation_from_events(
+    events,
+    *,
+    chat_id: str,
+    sender_id: str,
+    limit: int = 8,
+    max_chars: int = 600,
+) -> tuple[dict, ...]:
+    """Reconstruct recent DM turns (user + bot) from the audit log.
+
+    Gives the semantic agent the prior conversation so it can resolve a reply
+    against context (e.g. an affirmative answer to the bot's own pending
+    question) instead of guessing the target. Pure context, not a rule.
+    """
+
+    turns: list[dict] = []
+    for event in events:
+        etype = event.get("type")
+        payload = event.get("payload") or {}
+        msg = payload.get("message") or {}
+        text = str(msg.get("text") or "").strip()
+        if not text:
+            continue
+        if etype == "message.received" and msg.get("chat_id") == chat_id:
+            turns.append({"role": "user", "text": text[:max_chars]})
+        elif etype == "slack.message.sent" and payload.get("recipient_id") == sender_id:
+            turns.append({"role": "assistant", "text": text[:max_chars]})
+    return tuple(turns[-limit:])
 
 
 def _is_slack_notification_candidate_message(message: IncomingMessage) -> bool:
