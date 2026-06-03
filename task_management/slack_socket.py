@@ -322,8 +322,28 @@ async def run_slack_socket_loop(
                         },
                         occurred_at=datetime.now(),
                     )
+            if send and not ack_failed:
+                # Instant read receipt, applied in the receive loop BEFORE the
+                # blocking operating-agent processing so the 👀 never waits on opus.
+                try:
+                    receipt = slack_socket_envelope_to_incoming(
+                        envelope,
+                        config=adapter.config,
+                        expected_channel_id=adapter.channel_id,
+                    )
+                    if receipt is not None:
+                        adapter.add_reaction(
+                            receipt.chat_id, receipt.message_id.rsplit("/", 1)[-1], "eyes"
+                        )
+                except Exception:
+                    pass
             event_count += 1
-            processed = process_slack_socket_inbound_queue(
+            # Run the blocking operating-agent + dispatch off the event loop so the
+            # Socket Mode WebSocket keeps answering Slack pings during a long opus
+            # call. Otherwise the synchronous subprocess.run froze the event loop,
+            # Slack dropped the connection, and the next ack crashed the loop.
+            processed = await asyncio.to_thread(
+                process_slack_socket_inbound_queue,
                 store=store,
                 orchestrator=orchestrator,
                 adapter=adapter,
