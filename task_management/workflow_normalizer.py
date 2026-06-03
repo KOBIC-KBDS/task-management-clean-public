@@ -346,7 +346,9 @@ def _normalize_parent_relation(proposal: Proposal, *, root: Proposal, parent: Pr
     current_parent_id = metadata.get(PARENT_PROPOSAL_ID_KEY, "").strip()
     should_attach_to_root = False
 
-    if not current_parent_id:
+    if proposal.proposal_id == root.proposal_id:
+        should_attach_to_root = False  # a root must never become its own parent
+    elif not current_parent_id:
         should_attach_to_root = _is_follow_up_deliverable(proposal)
     elif parent is not None and parent.proposal_id != root.proposal_id:
         should_attach_to_root = _is_follow_up_deliverable(proposal) and (
@@ -364,6 +366,9 @@ def _normalize_parent_relation(proposal: Proposal, *, root: Proposal, parent: Pr
         metadata[PARENT_PROPOSAL_ID_KEY] = root.proposal_id
         metadata.setdefault("relation_type", "post_event_followup")
         metadata["workflow_relation_normalized"] = "true"
+
+    if metadata.get(PARENT_PROPOSAL_ID_KEY) == proposal.proposal_id:
+        metadata.pop(PARENT_PROPOSAL_ID_KEY, None)
 
     if metadata.get(PARENT_PROPOSAL_ID_KEY) == root.proposal_id:
         metadata[WORKFLOW_TITLE_KEY] = root.metadata.get(WORKFLOW_TITLE_KEY, root.title)

@@ -248,6 +248,7 @@ def workflow_group_approval_message(
         separate_lines.append(f"- {prefix}{child.title} ({reason})")
     text_lines = [
         f"연속 작업 묶음으로 보입니다. 한 번에 등록할까요: {parent.title}",
+        "(순서대로 이어지는 작업들을 하나의 워크플로우로 묶어 한 번에 등록합니다. 수락하면 각 단계가 하위작업으로 만들어지고, 위험 단계는 따로 확인합니다.)",
         "",
         *child_lines,
     ]

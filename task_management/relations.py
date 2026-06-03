@@ -83,7 +83,10 @@ def is_workflow_child(proposal: Proposal) -> bool:
 def is_workflow_parent(proposal: Proposal, proposals: list[Proposal] | tuple[Proposal, ...]) -> bool:
     if proposal.metadata.get(WORKFLOW_ROLE_KEY) == WORKFLOW_PARENT_ROLE:
         return True
-    return any(parent_proposal_id(item) == proposal.proposal_id for item in proposals)
+    return any(
+        parent_proposal_id(item) == proposal.proposal_id and item.proposal_id != proposal.proposal_id
+        for item in proposals
+    )
 
 
 def depends_on_proposal_ids(proposal: Proposal) -> tuple[str, ...]:
@@ -106,7 +109,12 @@ def blocking_dependencies(proposal: Proposal, proposals_by_id: dict[str, Proposa
 
 
 def child_proposals(parent: Proposal, proposals: list[Proposal] | tuple[Proposal, ...]) -> tuple[Proposal, ...]:
-    children = [proposal for proposal in proposals if parent_proposal_id(proposal) == parent.proposal_id]
+    children = [
+        proposal
+        for proposal in proposals
+        if parent_proposal_id(proposal) == parent.proposal_id
+        and proposal.proposal_id != parent.proposal_id
+    ]
     return order_child_proposals(children)
 
 
