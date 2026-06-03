@@ -24,9 +24,11 @@ therefore override inherited shell variables and also override blank values from
 | Key | Value | Notes |
 | --- | --- | --- |
 | TASK_MANAGEMENT_OPERATING_AGENT | claude | Use `claude` or `codex`. |
-| TASK_MANAGEMENT_CLAUDE_MODEL | sonnet | Used when agent is `claude`. |
+| TASK_MANAGEMENT_CLAUDE_MODEL | sonnet | Used when agent is `claude`. `sonnet`/`opus` alias resolves to the latest model. |
+| TASK_MANAGEMENT_CLAUDE_EFFORT |  | Optional `claude --effort` (low/medium/high/xhigh/max). Blank = CLI default. Lowers print-mode latency (speed lever). |
 | TASK_MANAGEMENT_CLAUDE_FALLBACK | 0 | Fail closed if Claude Code is unavailable. |
 | TASK_MANAGEMENT_CODEX_MODEL | gpt-5.5 | Used when agent is `codex`. |
+| TASK_MANAGEMENT_CODEX_EFFORT |  | Optional codex `model_reasoning_effort` (minimal/low/medium/high/xhigh). Blank = ~/.codex/config.toml. Tunes reasoning DEPTH for `codex exec`, not wall-clock latency. |
 
 ## Slack app values
 

@@ -31,6 +31,7 @@ Recommended environment:
 TASK_MANAGEMENT_OPERATING_AGENT=claude
 TASK_MANAGEMENT_CLAUDE_BIN=claude
 TASK_MANAGEMENT_CLAUDE_MODEL=sonnet
+TASK_MANAGEMENT_CLAUDE_EFFORT=
 TASK_MANAGEMENT_CLAUDE_TIMEOUT_SECONDS=180
 TASK_MANAGEMENT_CLAUDE_FALLBACK=0
 TASK_MANAGEMENT_CLAUDE_PERMISSION_MODE=plan
@@ -39,6 +40,13 @@ TASK_MANAGEMENT_CLAUDE_NO_SESSION_PERSISTENCE=1
 TASK_MANAGEMENT_CLAUDE_TOOLS=
 TASK_MANAGEMENT_CLAUDE_STRIP_API_KEY_ENV=1
 ```
+
+`TASK_MANAGEMENT_CLAUDE_MODEL` accepts an alias (`sonnet`/`opus`) that resolves to
+the latest model. `TASK_MANAGEMENT_CLAUDE_EFFORT` is optional: `low`/`medium`/`high`/
+`xhigh`/`max` passes `--effort` to print mode and is an effective latency lever
+(measured ~21s at `low` vs ~73s unset on the smoke fixture). The Codex backend has
+`TASK_MANAGEMENT_CODEX_EFFORT` → `model_reasoning_effort`, which tunes reasoning DEPTH
+for `codex exec` (reasoning tokens scale strongly) rather than wall-clock latency.
 
 The same Slack app, state-directory, and task-core setup can be reused with
 `TASK_MANAGEMENT_OPERATING_AGENT=codex` if you choose Codex instead.
