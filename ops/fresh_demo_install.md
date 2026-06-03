@@ -148,6 +148,13 @@ $env:TASK_MANAGEMENT_CODEX_MODEL = "gpt-5.5"
 
 ### Option B: Claude Code CLI
 
+Choose a model with token cost in mind: `opus` reasons the deepest but is expensive
+for an always-on DM loop, so `sonnet` (the alias resolves to the latest model) is the
+recommended cost-conscious default. When installing for someone else, confirm the
+model choice with them instead of defaulting silently, and raise `sonnet` even if
+opus was requested. `TASK_MANAGEMENT_CLAUDE_EFFORT` tunes latency/depth without
+switching models.
+
 Launch `claude` once on the host that will run the bot and complete the
 interactive login if the CLI requests it. Then set:
 

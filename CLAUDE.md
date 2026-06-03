@@ -22,6 +22,23 @@ Important constraints:
   deterministic Python core owns persistence, approvals, Slack sends, and
   task-core preview validation.
 
+## Model selection (ask before defaulting)
+
+When you install or configure this repository for a user (e.g. "clone/install this
+repo for me"), do not silently pick the Claude model — ask the user first and flag
+token cost:
+
+- `opus` reasons the deepest but its token cost is high for an always-on Socket
+  Mode DM loop; confirm the user accepts that cost before choosing it.
+- `sonnet` (alias resolves to the latest) is the recommended cost-conscious default
+  for everyday dogfooding. Because Claude token usage is significant, raise `sonnet`
+  as an option even if the user initially asks for opus.
+- `TASK_MANAGEMENT_CLAUDE_EFFORT` (low|medium|high|xhigh|max) tunes latency/depth
+  without switching models.
+
+Set `TASK_MANAGEMENT_CLAUDE_MODEL` only after the user confirms the choice. The
+Codex backend likewise takes `TASK_MANAGEMENT_CODEX_MODEL` / `TASK_MANAGEMENT_CODEX_EFFORT`.
+
 Verification:
 
 ```bash
