@@ -34,6 +34,7 @@ class CodexCliOperatingAgentConfig:
     fallback_on_error: bool = True
     sandbox: str = "read-only"
     ask_for_approval: str = "never"
+    reasoning_effort: str = ""
     strip_api_key_env: bool = True
 
     @classmethod
@@ -46,6 +47,7 @@ class CodexCliOperatingAgentConfig:
             fallback_on_error=os.environ.get("TASK_MANAGEMENT_CODEX_FALLBACK", "1").lower() not in {"0", "false", "no", "off"},
             sandbox=os.environ.get("TASK_MANAGEMENT_CODEX_SANDBOX", "read-only"),
             ask_for_approval=os.environ.get("TASK_MANAGEMENT_CODEX_APPROVAL", "never"),
+            reasoning_effort=os.environ.get("TASK_MANAGEMENT_CODEX_EFFORT", ""),
             strip_api_key_env=os.environ.get("TASK_MANAGEMENT_CODEX_STRIP_API_KEY_ENV", "1").lower()
             not in {"0", "false", "no", "off"},
         )
@@ -82,6 +84,13 @@ class SubprocessCodexExecRunner:
             ]
             if config.model:
                 command[2:2] = ["--model", config.model]
+            # Optional reasoning-effort override for `codex exec`. Empty by default so the
+            # user's ~/.codex/config.toml (model_reasoning_effort) governs. When set
+            # (TASK_MANAGEMENT_CODEX_EFFORT=minimal|low|medium|high|xhigh) it scales reasoning
+            # DEPTH (reasoning tokens, e.g. low~15 vs xhigh~516 on a hard prompt), NOT
+            # wall-clock latency: `codex exec` session/tool startup overhead dominates time.
+            if config.reasoning_effort:
+                command[2:2] = ["-c", f'model_reasoning_effort="{config.reasoning_effort}"']
             env = os.environ.copy()
             if config.strip_api_key_env:
                 env.pop("OPENAI_API_KEY", None)

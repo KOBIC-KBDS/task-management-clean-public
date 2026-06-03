@@ -33,6 +33,7 @@ class ClaudeCodeCliOperatingAgentConfig:
     timeout_seconds: float = 180.0
     fallback_on_error: bool = False
     permission_mode: str = "plan"
+    effort: str = ""
     max_turns: int = 3
     no_session_persistence: bool = True
     tools: str = ""
@@ -48,6 +49,7 @@ class ClaudeCodeCliOperatingAgentConfig:
             fallback_on_error=os.environ.get("TASK_MANAGEMENT_CLAUDE_FALLBACK", "0").lower()
             not in {"0", "false", "no", "off"},
             permission_mode=os.environ.get("TASK_MANAGEMENT_CLAUDE_PERMISSION_MODE", "plan"),
+            effort=os.environ.get("TASK_MANAGEMENT_CLAUDE_EFFORT", ""),
             max_turns=int(os.environ.get("TASK_MANAGEMENT_CLAUDE_MAX_TURNS", "3")),
             no_session_persistence=os.environ.get("TASK_MANAGEMENT_CLAUDE_NO_SESSION_PERSISTENCE", "1").lower()
             not in {"0", "false", "no", "off"},
@@ -193,6 +195,11 @@ def _claude_command(config: ClaudeCodeCliOperatingAgentConfig, *, schema: Mappin
         command.append("--no-session-persistence")
     if config.permission_mode:
         command.extend(["--permission-mode", config.permission_mode])
+    # Optional reasoning effort (TASK_MANAGEMENT_CLAUDE_EFFORT=low|medium|high|xhigh|max).
+    # Unlike codex, this directly scales Claude print-mode wall-clock latency
+    # (measured ~21s low .. ~73s unset on the smoke fixture), so it doubles as a speed lever.
+    if config.effort:
+        command.extend(["--effort", config.effort])
     command.extend(["--tools", config.tools])
     if config.max_turns > 0:
         command.extend(["--max-turns", str(config.max_turns)])
