@@ -18,9 +18,11 @@ from task_management.relations import (
     workflow_projection,
 )
 from task_management.slack_home import build_slack_home_view
+from task_management.secretary import build_morning_briefing
 from task_management.store import TeamTaskStore
 from task_management.task_core_bridge import build_task_management_task_export_from_proposals
 from task_management.timeline import proposal_timeline
+from task_management.workflow_normalizer import normalize_existing_proposal_graph
 
 
 NOW = datetime(2026, 5, 29, 9, 0, 0)
@@ -331,6 +333,309 @@ def test_done_dashboard_keeps_workflow_children_under_parent(tmp_path: Path) -> 
     assert done[0]["children"][0]["title"] == "Done child"
     html = render_web_task_page_html(model)
     assert "하위작업 1/1 완료" in html
+
+
+def test_new_followup_rehomes_under_promoted_workflow_root(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    root = replace(
+        _proposal("proposal/review", "demo-study 발표자료 리뷰 논의", status="approved"),
+        kind="event",
+        scheduled_date=date(2026, 5, 28),
+        time_window="10:00",
+        metadata={"participants": "me", "progress_status": "scheduled_for_13_00_to_13_30"},
+    )
+    decision_child = replace(
+        _proposal("proposal/date-decision", "제3회 demo-study 일정 결정", status="done"),
+        kind="event",
+        scheduled_date=date(2026, 6, 2),
+        time_window="14:00",
+        metadata={
+            "parent_proposal_id": root.proposal_id,
+            "decision_pending": "true",
+            "completed_at": "2026-06-02T15:00:00",
+        },
+    )
+    store.save_proposal(root)
+    store.save_proposal(decision_child)
+    followup = _draft(
+        "proposal/followup",
+        "3회 demo-study 후속자료·완료보고서 메일 발송",
+        due_date=date(2026, 6, 3),
+        metadata={
+            "parent_proposal_id": decision_child.proposal_id,
+            "risk_level": "medium",
+            "risk_reason": "external_send",
+            "requires_separate_approval": "true",
+        },
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=StaticDraftAgent((followup,))).handle_message(
+        IncomingMessage(
+            message_id="slack/DTEST/followup",
+            sender_id="me",
+            chat_id="DTEST",
+            visibility="private",
+            text="followup",
+            received_at=datetime(2026, 6, 3, 9, 0, 0),
+        )
+    )
+
+    promoted = store.get_proposal(root.proposal_id)
+    created = store.get_proposal("proposal/followup")
+    assert promoted is not None
+    assert created is not None
+    assert promoted.title == "제3회 demo-study"
+    assert promoted.metadata["workflow_role"] == "parent"
+    assert promoted.metadata["workflow_container"] == "true"
+    assert promoted.metadata["previous_title"] == "demo-study 발표자료 리뷰 논의"
+    assert created.metadata["parent_proposal_id"] == root.proposal_id
+    assert created.metadata["depends_on_proposal_ids"] == decision_child.proposal_id
+    assert created.status == "awaiting_approval"
+    assert result.approval_requests[0].proposal_id == created.proposal_id
+    assert "workflow.graph_normalized" in [event["type"] for event in store.read_events()]
+
+    model = build_web_task_page_model(store, today=date(2026, 6, 3))
+    today = model["sections"]["today"]
+    assert [item["title"] for item in today] == ["제3회 demo-study"]
+    assert today[0]["urgency_label"] == ""
+    assert today[0]["children"][0]["title"] == "제3회 demo-study 일정 결정"
+    assert today[0]["children"][1]["title"] == "3회 demo-study 후속자료·완료보고서 메일 발송"
+
+    briefing = build_morning_briefing(store, now=datetime(2026, 6, 3, 9, 30), actor_id="me", reserve=False)[0]
+    assert "- 제3회 demo-study — 하위작업 중심으로 확인합니다." in briefing.text
+    assert "3회 demo-study 후속자료·완료보고서 메일 발송" in briefing.text
+    assert "일정 지남 · 결과 확인 필요" not in briefing.text
+
+
+def test_existing_backfill_rehomes_followups_without_weak_cross_workflow_matches(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    root = replace(
+        _proposal("proposal/review", "demo-study 발표자료 리뷰 논의", status="approved"),
+        kind="event",
+        scheduled_date=date(2026, 5, 28),
+        time_window="10:00",
+        metadata={"progress_status": "scheduled_for_13_00_to_13_30"},
+    )
+    decision_child = replace(
+        _proposal("proposal/date-decision", "제3회 demo-study 일정 결정", status="done"),
+        kind="event",
+        scheduled_date=date(2026, 6, 2),
+        time_window="14:00",
+        metadata={
+            "parent_proposal_id": root.proposal_id,
+            "completed_at": "2026-06-02T15:00:00",
+        },
+    )
+    followup = _proposal(
+        "proposal/followup",
+        "3회 demo-study 후속자료·완료보고서 메일 발송",
+        status="awaiting_approval",
+        due_date=date(2026, 6, 3),
+        metadata={
+            "parent_proposal_id": decision_child.proposal_id,
+            "workflow_group_id": f"workflow-group/{decision_child.proposal_id}",
+            "requires_separate_approval": "true",
+        },
+    )
+    generic_root = _proposal(
+        "proposal/generic-root",
+        "hierarchy 기능 검증용 문서 정리",
+        status="done",
+        due_date=date(2026, 6, 1),
+        metadata={"workflow_role": "parent", "workflow_title": "hierarchy 기능 검증용 문서 정리"},
+    )
+    date_like_child = _proposal(
+        "proposal/date-like",
+        "260526 회의결과 공유",
+        status="done",
+        due_date=date(2026, 6, 1),
+        metadata={"parent_proposal_id": generic_root.proposal_id},
+    )
+    unrelated_followup = _proposal(
+        "proposal/unrelated",
+        "Example Partner 담당자 후속 논의 안건 정리",
+        status="approved",
+        due_date=date(2026, 6, 4),
+    )
+    for proposal in (root, decision_child, followup, generic_root, date_like_child, unrelated_followup):
+        store.save_proposal(proposal)
+
+    normalized = normalize_existing_proposal_graph(store.list_proposals(), normalized_at=datetime(2026, 6, 3, 12, 0))
+    updates = {proposal.proposal_id: proposal for proposal in normalized.updated_existing}
+
+    promoted = updates[root.proposal_id]
+    assert promoted.title == "제3회 demo-study"
+    assert promoted.metadata["workflow_container"] == "true"
+    assert promoted.metadata["workflow_original_title"] == "demo-study 발표자료 리뷰 논의"
+
+    rehomed = updates[followup.proposal_id]
+    assert rehomed.metadata["parent_proposal_id"] == root.proposal_id
+    assert rehomed.metadata["depends_on_proposal_ids"] == decision_child.proposal_id
+    assert rehomed.metadata["workflow_group_id"] == f"workflow-group/{root.proposal_id}"
+
+    assert updates.get(generic_root.proposal_id, generic_root).title == "hierarchy 기능 검증용 문서 정리"
+    assert updates[date_like_child.proposal_id].metadata["workflow_title"] == "hierarchy 기능 검증용 문서 정리"
+    assert unrelated_followup.proposal_id not in updates
+
+
+def test_existing_backfill_links_completion_source_under_workflow_root(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    root = replace(
+        _proposal("proposal/review", "demo-study 발표자료 리뷰 논의", status="approved"),
+        kind="event",
+        scheduled_date=date(2026, 5, 28),
+        metadata={"workflow_role": "parent", "workflow_title": "제3회 demo-study", "workflow_container": "true"},
+    )
+    decision_child = replace(
+        _proposal("proposal/date-decision", "제3회 demo-study 일정 결정", status="done"),
+        kind="event",
+        scheduled_date=date(2026, 6, 2),
+        time_window="14:00",
+        metadata={
+            "parent_proposal_id": root.proposal_id,
+            "linked_completion_source_proposal_id": "proposal/study-done",
+            "completed_at": "2026-06-03T10:33:26",
+        },
+    )
+    study_done = replace(
+        _proposal("proposal/study-done", "6/2 스터디 진행", status="done"),
+        kind="event",
+        scheduled_date=date(2026, 6, 2),
+        time_window="14:00",
+        metadata={"completed_at": "2026-06-03T10:26:54"},
+    )
+    for proposal in (root, decision_child, study_done):
+        store.save_proposal(proposal)
+
+    normalized = normalize_existing_proposal_graph(store.list_proposals(), normalized_at=datetime(2026, 6, 3, 14, 0))
+    updates = {proposal.proposal_id: proposal for proposal in normalized.updated_existing}
+
+    linked = updates[study_done.proposal_id]
+    assert linked.metadata["parent_proposal_id"] == root.proposal_id
+    assert linked.metadata["depends_on_proposal_ids"] == decision_child.proposal_id
+    assert linked.metadata["workflow_title"] == "제3회 demo-study"
+    assert linked.metadata["relation_type"] == "workflow_completion_evidence"
+
+
+def test_existing_backfill_creates_parent_for_dependency_only_workflow_title(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    first = _proposal(
+        "proposal/materials",
+        "이의신청 자료 전달받기",
+        status="done",
+        due_date=date(2026, 6, 1),
+        metadata={"workflow_title": "demo 이의신청 자료 업로드", "completed_at": "2026-06-01T16:09:01"},
+    )
+    second = _proposal(
+        "proposal/upload",
+        "demo 이의신청 자료 업로드",
+        status="done",
+        due_date=date(2026, 6, 1),
+        metadata={
+            "workflow_title": "demo 이의신청 자료 업로드",
+            "depends_on_proposal_ids": first.proposal_id,
+            "completed_at": "2026-06-01T16:09:01",
+        },
+    )
+    store.save_proposal(first)
+    store.save_proposal(second)
+
+    normalized = normalize_existing_proposal_graph(store.list_proposals(), normalized_at=datetime(2026, 6, 3, 14, 0))
+
+    assert len(normalized.proposals) == 1
+    parent = normalized.proposals[0]
+    assert parent.title == "demo 이의신청 자료 업로드"
+    assert parent.status == "done"
+    assert parent.metadata["workflow_role"] == "parent"
+    assert parent.metadata["workflow_backfill_created"] == "true"
+    updates = {proposal.proposal_id: proposal for proposal in normalized.updated_existing}
+    assert updates[first.proposal_id].metadata["parent_proposal_id"] == parent.proposal_id
+    assert updates[first.proposal_id].metadata["step_index"] == "1"
+    assert updates[second.proposal_id].metadata["parent_proposal_id"] == parent.proposal_id
+    assert updates[second.proposal_id].metadata["step_index"] == "2"
+
+
+def test_existing_backfill_converts_comma_parent_to_dependencies(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    first = _proposal("proposal/first", "First", status="done")
+    second = _proposal("proposal/second", "Second", status="done")
+    child = _proposal(
+        "proposal/child",
+        "Shared result",
+        status="done",
+        metadata={"parent_proposal_id": f"{first.proposal_id},{second.proposal_id}"},
+    )
+    for proposal in (first, second, child):
+        store.save_proposal(proposal)
+
+    normalized = normalize_existing_proposal_graph(store.list_proposals(), normalized_at=datetime(2026, 6, 3, 14, 0))
+    updates = {proposal.proposal_id: proposal for proposal in normalized.updated_existing}
+
+    repaired = updates[child.proposal_id]
+    assert "parent_proposal_id" not in repaired.metadata
+    assert repaired.metadata["depends_on_proposal_ids"] == f"{first.proposal_id},{second.proposal_id}"
+    assert repaired.metadata["relation_type"] == "dependency_only"
+
+
+def test_home_and_briefing_limit_completed_children_to_recent_two(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    parent = _proposal(
+        "proposal/workflow",
+        "Workflow",
+        due_date=NOW.date(),
+        metadata={"workflow_role": "parent", "workflow_container": "true"},
+    )
+    children = (
+        _proposal(
+            "proposal/done-old",
+            "Old done child",
+            status="done",
+            due_date=NOW.date(),
+            metadata={"parent_proposal_id": parent.proposal_id, "step_index": "1", "step_count": "4", "completed_at": "2026-05-29T09:00:00"},
+        ),
+        _proposal(
+            "proposal/done-recent-a",
+            "Recent done child A",
+            status="done",
+            due_date=NOW.date(),
+            metadata={"parent_proposal_id": parent.proposal_id, "step_index": "2", "step_count": "4", "completed_at": "2026-05-29T10:00:00"},
+        ),
+        _proposal(
+            "proposal/done-recent-b",
+            "Recent done child B",
+            status="done",
+            due_date=NOW.date(),
+            metadata={"parent_proposal_id": parent.proposal_id, "step_index": "3", "step_count": "4", "completed_at": "2026-05-29T11:00:00"},
+        ),
+        _proposal(
+            "proposal/open",
+            "Open child",
+            status="awaiting_approval",
+            due_date=NOW.date(),
+            metadata={"parent_proposal_id": parent.proposal_id, "step_index": "4", "step_count": "4"},
+        ),
+    )
+    store.save_proposal(parent)
+    for child in children:
+        store.save_proposal(child)
+
+    view = build_slack_home_view(store, now=NOW)
+    today_text = next(
+        block["text"]["text"]
+        for block in view["blocks"]
+        if block.get("type") == "section" and block["text"]["text"].startswith("*오늘*")
+    )
+    assert "하위작업 3/4 완료 · 다음: 4/4 Open child · 완료 1개 숨김" in today_text
+    assert "~Recent done child A~" in today_text
+    assert "~Recent done child B~" in today_text
+    assert "Old done child" not in today_text
+    assert "*Open child*" in today_text
+
+    briefing = build_morning_briefing(store, now=NOW, actor_id="me", reserve=False)[0]
+    assert "하위작업 3/4 완료 · 다음: 4/4 Open child · 완료 1개 숨김" in briefing.text
+    assert "~Recent done child A~" in briefing.text
+    assert "~Recent done child B~" in briefing.text
+    assert "Old done child" not in briefing.text
 
 
 def test_timeline_and_backfill_report_are_read_only(tmp_path: Path) -> None:

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime
 import json
 import os
 from pathlib import Path
+import shutil
 import re
 import time
 from typing import Sequence
@@ -66,6 +67,7 @@ from .slack_socket import (
     run_slack_socket_loop,
 )
 from .store import TeamTaskStore
+from .workflow_normalizer import normalize_existing_proposal_graph
 
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -254,6 +256,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     backfill.add_argument("--output", type=Path, required=True)
 
+    apply_backfill = subparsers.add_parser(
+        "workflow-backfill-apply",
+        help="Apply conservative workflow hierarchy normalization to existing proposals.",
+    )
+    apply_backfill.add_argument("--output", type=Path, help="Write JSON apply summary.")
+    apply_backfill.add_argument("--now", default=datetime.now().isoformat(timespec="seconds"))
+    apply_backfill.add_argument("--dry-run", action="store_true", help="Show proposed updates without mutating state.")
+
     simulate = subparsers.add_parser("simulate", help="Run fixture actions through the simulator.")
     simulate.add_argument("--fixture", type=Path, required=True)
 
@@ -401,6 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
     briefing.add_argument("--actor", default="me")
     briefing.add_argument("--dashboard-url", default="http://127.0.0.1:8787/dashboard.html")
     briefing.add_argument("--send", action="store_true", help="Send the briefing through configured Slack DM.")
+    briefing.add_argument("--force", action="store_true", help="Send with a unique dedupe key even if today's briefing was delivered.")
 
     afternoon = subparsers.add_parser(
         "afternoon-briefing",
@@ -410,6 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
     afternoon.add_argument("--actor", default="me")
     afternoon.add_argument("--dashboard-url", default="http://127.0.0.1:8787/dashboard.html")
     afternoon.add_argument("--send", action="store_true", help="Send the briefing through configured Slack DM.")
+    afternoon.add_argument("--force", action="store_true", help="Send with a unique dedupe key even if today's briefing was delivered.")
 
     proactive_checks = subparsers.add_parser(
         "proactive-checks",
@@ -567,6 +579,78 @@ def main(argv: Sequence[str] | None = None) -> None:
         report = build_workflow_backfill_report(store.list_proposals(), store.read_events())
         output = write_workflow_backfill_report(report, args.output)
         _print_json({"output": str(output), "counts": report["counts"], "mutation_policy": report["mutation_policy"]})
+    elif args.command == "workflow-backfill-apply":
+        applied_at = datetime.fromisoformat(args.now)
+        before = {proposal.proposal_id: proposal for proposal in store.list_proposals()}
+        normalization = normalize_existing_proposal_graph(tuple(before.values()), normalized_at=applied_at)
+        created = tuple(normalization.proposals)
+        updates = tuple(normalization.updated_existing)
+        backup_dir = None
+        if not args.dry_run:
+            backup_dir = _checkpoint_state(args.state, "workflow-backfill-apply", created_at=applied_at)
+            for proposal in created:
+                store.save_proposal(proposal)
+                store.append_event(
+                    "workflow.backfill.created",
+                    {
+                        "proposal": proposal,
+                        "reason": proposal.metadata.get("workflow_rename_reason", "synthetic_workflow_container"),
+                        "backup_dir": str(backup_dir),
+                    },
+                    occurred_at=applied_at,
+                )
+            for proposal in updates:
+                store.save_proposal(proposal)
+                store.append_event(
+                    "workflow.backfill.applied",
+                    {
+                        "proposal": proposal,
+                        "before": before.get(proposal.proposal_id),
+                        "reason": proposal.metadata.get("workflow_rename_reason", "relation_normalized"),
+                        "backup_dir": str(backup_dir),
+                    },
+                    occurred_at=applied_at,
+                )
+            store.append_event(
+                "workflow.backfill.completed",
+                {
+                    "created_proposal_ids": [proposal.proposal_id for proposal in created],
+                    "updated_proposal_ids": [proposal.proposal_id for proposal in updates],
+                    "created_count": len(created),
+                    "updated_count": len(updates),
+                    "backup_dir": str(backup_dir),
+                    "dry_run": False,
+                    "outbound_messages": False,
+                    "task_core_writes": False,
+                },
+                occurred_at=applied_at,
+            )
+        summary = {
+            "dry_run": args.dry_run,
+            "created_count": len(created),
+            "updated_count": len(updates),
+            "created_proposal_ids": [proposal.proposal_id for proposal in created],
+            "updated_proposal_ids": [proposal.proposal_id for proposal in updates],
+            "created": [asdict(proposal) for proposal in created],
+            "updates": [
+                {
+                    "proposal_id": proposal.proposal_id,
+                    "before": asdict(before[proposal.proposal_id]) if proposal.proposal_id in before else None,
+                    "after": asdict(proposal),
+                }
+                for proposal in updates
+            ],
+            "backup_dir": str(backup_dir) if backup_dir else "",
+            "mutation_policy": (
+                "dry_run_no_store_writes_no_event_append_no_outbound"
+                if args.dry_run
+                else "store_writes_and_event_append_no_outbound_no_task_core_writes"
+            ),
+        }
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+        _print_json(summary)
     elif args.command == "simulate":
         simulator = TeamTaskSimulator(args.state, operating_agent=_build_operating_agent(args.agent))
         actions = json.loads(args.fixture.read_text(encoding="utf-8"))
@@ -989,6 +1073,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             dashboard_url=args.dashboard_url,
             reserve=False if args.send else args.send,
         )
+        if args.force:
+            messages = _with_forced_dedupe(messages, suffix=now.strftime("%Y%m%dT%H%M%S"))
         if args.send and messages:
             _send_personal_messages(store, messages, sent_at=now)
         _print_json([asdict(item) for item in messages])
@@ -1001,6 +1087,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             dashboard_url=args.dashboard_url,
             reserve=False if args.send else args.send,
         )
+        if args.force:
+            messages = _with_forced_dedupe(messages, suffix=now.strftime("%Y%m%dT%H%M%S"))
         if args.send and messages:
             _send_personal_messages(store, messages, sent_at=now)
         _print_json([asdict(item) for item in messages])
@@ -1060,6 +1148,27 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 def _store(state_dir: Path) -> TeamTaskStore:
     return TeamTaskStore(state_dir / "task_management.sqlite3", state_dir / "events.jsonl")
+
+
+def _checkpoint_state(state_dir: Path, label: str, *, created_at: datetime) -> Path:
+    timestamp = created_at.strftime("%Y%m%dT%H%M%S")
+    backup_dir = state_dir / "backups" / f"{timestamp}-{label}"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("task_management.sqlite3", "events.jsonl"):
+        source = state_dir / name
+        if source.exists():
+            shutil.copy2(source, backup_dir / name)
+    return backup_dir
+
+
+def _with_forced_dedupe(messages, *, suffix: str):
+    forced = []
+    for message in messages:
+        card = dict(message.card)
+        base = card.get("dedupe_key") or f"slack-outbound/{message.recipient_id}/{message.message_type}"
+        card["dedupe_key"] = f"{base}/force/{suffix}"
+        forced.append(replace(message, card=card))
+    return tuple(forced)
 
 
 def _send_personal_messages(store: TeamTaskStore, messages, *, sent_at: datetime) -> None:

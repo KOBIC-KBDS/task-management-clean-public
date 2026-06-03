@@ -206,6 +206,9 @@ class CodexCliOperatingAgent:
             + "location, location_optional, date_window_start, date_window_end, needs_exact_date, needs_exact_time, materials, needs_prep, "
             + "parent_proposal_id, parent_source_key, depends_on_proposal_ids, depends_on_source_keys, step_index, step_count, workflow_id, workflow_title, "
             + "workflow_role, risk_level, risk_reason, requires_separate_approval.\n"
+            + "For study/meeting/event lifecycles, prefer a stable workflow root for the actual named event over narrow planning steps. "
+            + "Post-event deliverables such as follow-up materials, completion reports, result sharing, or outbound email attach to the workflow root "
+            + "or nearest active workflow ancestor, not to a completed schedule-decision child; keep that decision as a dependency when relevant.\n"
             + "<task_management_context>\n"
             + json.dumps(context, ensure_ascii=False, sort_keys=True, indent=2)
             + "\n</task_management_context>\n"

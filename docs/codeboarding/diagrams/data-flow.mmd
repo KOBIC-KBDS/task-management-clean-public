@@ -1,0 +1,6 @@
+flowchart LR
+  code["Repository source"]
+  inventory["Static inventory JSON"]
+  docs["Markdown + Mermaid outputs"]
+  code --> inventory --> docs
+  skipped["Skipped secret/runtime-like paths"] -. excluded .-> inventory
