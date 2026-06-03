@@ -244,6 +244,9 @@ python -X utf8 -m pytest -q
 
 ## Repository hygiene
 
+For the public-release import boundary, see
+[`docs/clean-release-boundary.md`](docs/clean-release-boundary.md).
+
 Do not commit:
 
 - `.task-management-*` / local SQLite state

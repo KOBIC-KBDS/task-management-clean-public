@@ -23,3 +23,7 @@ Each deployment must create its own local state directory and configure its own 
 ## Release hygiene
 
 Before publishing future releases, scan both the current tree and git history for secrets, Slack identifiers, local paths, runtime files, and real transcripts. Public releases should be produced from a fresh-history export rather than by making a staging mirror public.
+
+For the concrete import boundary used when strengthening this public clean repo
+from clean staging or operational development, see
+[`docs/clean-release-boundary.md`](docs/clean-release-boundary.md).
