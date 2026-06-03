@@ -722,6 +722,36 @@ def validate_operating_decision_payload(payload: Mapping[str, object]) -> None:
         _validate_keys(item, CLARIFICATION_QUESTION_OUTPUT_SCHEMA, "clarification_questions[]")
 
 
+_LOCATION_OPTIONAL_TOKENS = (
+    "배석", "발표", "리뷰위원회", "퇴근", "귀가", "출근", "외출", "외근", "재택",
+)
+
+
+def _normalize_draft_metadata(metadata: dict[str, str], *, raw_text: str, title: str) -> dict[str, str]:
+    """Deterministic metadata normalization shared by every operating-agent backend.
+
+    This lives in the core (not in a single CLI adapter) so claude/codex/openai
+    all produce identical proposals from the same semantic intent — the project's
+    "swap only the brain" contract.
+    """
+    normalized = dict(metadata)
+    attendees = normalized.get("attendees", "")
+    if attendees and not normalized.get("external_participants"):
+        normalized["external_participants"] = attendees
+    if attendees and not normalized.get("participant_label"):
+        normalized["participant_label"] = attendees
+    text = f"{raw_text} {title} {attendees}"
+    if not normalized.get("participants") and ("나" in text or "me" in text):
+        normalized["participants"] = "me"
+    if (
+        not normalized.get("location")
+        and normalized.get("location_optional") != "true"
+        and any(token in text for token in _LOCATION_OPTIONAL_TOKENS)
+    ):
+        normalized["location_optional"] = "true"
+    return normalized
+
+
 def _draft_from_payload(item: Mapping[str, Any]) -> ProposalDraft:
     metadata = item["metadata"]
     if not isinstance(metadata, Mapping):
@@ -750,7 +780,11 @@ def _draft_from_payload(item: Mapping[str, Any]) -> ProposalDraft:
         needs_review=bool(item["needs_review"]),
         source_url=str(item["source_url"]),
         source_export_path=str(item["source_export_path"]),
-        metadata={str(key): str(value) for key, value in metadata.items()},
+        metadata=_normalize_draft_metadata(
+            {str(key): str(value) for key, value in metadata.items()},
+            raw_text=str(item["raw_text"]),
+            title=str(item["title"]),
+        ),
     )
 
 

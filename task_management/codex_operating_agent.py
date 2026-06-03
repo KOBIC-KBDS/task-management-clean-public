@@ -363,12 +363,6 @@ def _normalize_codex_payload(payload: Mapping[str, object]) -> Mapping[str, obje
         draft = dict(item)
         if "metadata_json" in draft:
             draft["metadata"] = _json_string_object(draft.pop("metadata_json"), "metadata_json")
-        if isinstance(draft.get("metadata"), Mapping):
-            draft["metadata"] = _normalize_metadata(
-                draft["metadata"],
-                raw_text=str(draft.get("raw_text", "")),
-                title=str(draft.get("title", "")),
-            )
         drafts.append(draft)
     patches = []
     for item in payload.get("proposal_patches", []) or []:
@@ -396,21 +390,6 @@ def _json_string_object(value: object, label: str) -> dict[str, str]:
     if not isinstance(payload, Mapping):
         raise CodexOperatingAgentError(f"{label} must decode to an object")
     return {str(key): str(item) for key, item in payload.items()}
-
-
-def _normalize_metadata(metadata: Mapping[str, object], *, raw_text: str, title: str) -> dict[str, str]:
-    normalized = {str(key): str(item) for key, item in metadata.items()}
-    attendees = normalized.get("attendees", "")
-    if attendees and not normalized.get("external_participants"):
-        normalized["external_participants"] = attendees
-    if attendees and not normalized.get("participant_label"):
-        normalized["participant_label"] = attendees
-    text = f"{raw_text} {title} {attendees}"
-    if not normalized.get("participants") and ("나" in text or "me" in text):
-        normalized["participants"] = "me"
-    if not normalized.get("location") and any(token in text for token in ("배석", "발표", "리뷰위원회")):
-        normalized["location_optional"] = "true"
-    return normalized
 
 
 def _resolve_codex_bin(codex_bin: str) -> str:
