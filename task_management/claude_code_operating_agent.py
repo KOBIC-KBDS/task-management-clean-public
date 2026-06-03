@@ -85,6 +85,7 @@ class SubprocessClaudeCodeRunner:
             command,
             input=prompt,
             text=True,
+            encoding="utf-8",  # never use the Windows locale codec (cp949) for the prompt/JSON pipe
             capture_output=True,
             cwd=config.cwd,
             env=_subprocess_env(config),
