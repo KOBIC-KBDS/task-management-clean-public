@@ -22,7 +22,7 @@ from task_management.secretary import build_morning_briefing
 from task_management.store import TeamTaskStore
 from task_management.task_core_bridge import build_task_management_task_export_from_proposals
 from task_management.timeline import proposal_timeline
-from task_management.workflow_normalizer import normalize_existing_proposal_graph
+from task_management.workflow_normalizer import normalize_existing_proposal_graph, normalize_new_proposal_graph
 
 
 NOW = datetime(2026, 5, 29, 9, 0, 0)
@@ -476,6 +476,93 @@ def test_existing_backfill_rehomes_followups_without_weak_cross_workflow_matches
     assert updates.get(generic_root.proposal_id, generic_root).title == "hierarchy 기능 검증용 문서 정리"
     assert updates[date_like_child.proposal_id].metadata["workflow_title"] == "hierarchy 기능 검증용 문서 정리"
     assert unrelated_followup.proposal_id not in updates
+
+
+def test_existing_backfill_merges_same_title_task_event_commitment(tmp_path: Path) -> None:
+    task = _proposal(
+        "proposal/next-week-progress",
+        "차주 expression_db 회의·exDB/KEA 미팅",
+        status="approved",
+        due_date=date(2026, 6, 5),
+    )
+    task = replace(task, time_window="10:00")
+    event = replace(
+        _proposal(
+            "proposal/next-week-meeting",
+            "차주 expression_db 회의·exDB/KEA 미팅",
+            status="approved",
+        ),
+        kind="event",
+        due_date=None,
+        scheduled_date=date(2026, 6, 5),
+        time_window="10:00",
+    )
+
+    normalized = normalize_existing_proposal_graph((task, event), normalized_at=datetime(2026, 6, 8, 9, 0))
+    updates = {proposal.proposal_id: proposal for proposal in normalized.updated_existing}
+
+    canonical = updates[event.proposal_id]
+    duplicate = updates[task.proposal_id]
+    assert canonical.status == "approved"
+    assert canonical.metadata["merged_duplicate_proposal_ids"] == task.proposal_id
+    assert duplicate.status == "rejected"
+    assert duplicate.metadata["merged_into_proposal_id"] == event.proposal_id
+    assert duplicate.metadata["merged_original_status"] == "approved"
+
+    store = _store(tmp_path)
+    store.save_proposal(canonical)
+    store.save_proposal(duplicate)
+    model = build_web_task_page_model(store, today=date(2026, 6, 8))
+    today_titles = [item["title"] for item in model["sections"]["today"]]
+    assert today_titles == ["차주 expression_db 회의·exDB/KEA 미팅"]
+
+
+def test_new_duplicate_event_merges_existing_due_task(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    existing = _proposal(
+        "proposal/next-week-progress",
+        "차주 expression_db 회의·exDB/KEA 미팅",
+        status="approved",
+        due_date=date(2026, 6, 5),
+    )
+    store.save_proposal(replace(existing, time_window="10:00"))
+    event_draft = ProposalDraft(
+        source_key="proposal/next-week-meeting",
+        raw_text="차주 expression_db 회의·exDB/KEA 미팅",
+        title="차주 expression_db 회의·exDB/KEA 미팅",
+        discussion_id="slack/DTEST",
+        message_id="slack/DTEST/new",
+        line_number=1,
+        speaker="me",
+        assigned_to="me",
+        task_management_area="work",
+        scheduled_date=date(2026, 6, 5),
+        time_window="10:00",
+        item_type="event",
+        metadata={"participants": "me", "external_participants": "최지인 선생님", "location_optional": "true"},
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=StaticDraftAgent((event_draft,))).handle_message(
+        IncomingMessage(
+            message_id="slack/DTEST/new",
+            sender_id="me",
+            chat_id="DTEST",
+            visibility="private",
+            text="next meeting",
+            received_at=datetime(2026, 6, 4, 9, 0),
+        )
+    )
+
+    canonical = store.get_proposal("proposal/next-week-meeting")
+    duplicate = store.get_proposal("proposal/next-week-progress")
+    assert canonical is not None
+    assert duplicate is not None
+    assert canonical.kind == "event"
+    assert canonical.status == "approved"
+    assert duplicate.status == "rejected"
+    assert duplicate.metadata["merged_into_proposal_id"] == canonical.proposal_id
+    assert result.outbound_messages
+    assert result.outbound_messages[0].message_type == "proposal_approved"
 
 
 def test_existing_backfill_links_completion_source_under_workflow_root(tmp_path: Path) -> None:

@@ -104,7 +104,8 @@ def normalize_new_proposal_graph(
     scheduling-decision child when an existing workflow root is available.
     """
 
-    by_id = {proposal.proposal_id: proposal for proposal in existing_proposals}
+    existing_by_id = {proposal.proposal_id: proposal for proposal in existing_proposals}
+    by_id = dict(existing_by_id)
     by_id.update({proposal.proposal_id: proposal for proposal in new_proposals})
     updated_existing_by_id: dict[str, Proposal] = {}
     normalized: list[Proposal] = []
@@ -128,6 +129,16 @@ def normalize_new_proposal_graph(
                 root = promoted_root
 
             next_proposal = _normalize_parent_relation(next_proposal, root=root, parent=parent)
+
+        next_proposal, duplicate_updates = _normalize_new_duplicate_commitment(
+            next_proposal,
+            existing_by_id,
+            normalized_at=normalized_at,
+        )
+        for updated in duplicate_updates:
+            updated_existing_by_id[updated.proposal_id] = updated
+            by_id[updated.proposal_id] = updated
+            existing_by_id[updated.proposal_id] = updated
 
         normalized.append(next_proposal)
         by_id[next_proposal.proposal_id] = next_proposal
@@ -193,6 +204,11 @@ def normalize_existing_proposal_graph(
             by_id[updated.proposal_id] = updated
 
     for updated in _normalize_multi_parent_dependencies(by_id):
+        if updated.proposal_id not in created:
+            updates[updated.proposal_id] = updated
+            by_id[updated.proposal_id] = updated
+
+    for updated in _normalize_duplicate_commitments(by_id, normalized_at=normalized_at):
         if updated.proposal_id not in created:
             updates[updated.proposal_id] = updated
             by_id[updated.proposal_id] = updated
@@ -377,6 +393,195 @@ def _normalize_parent_relation(proposal: Proposal, *, root: Proposal, parent: Pr
         metadata["workflow_group_id"] = f"workflow-group/{root.proposal_id}"
 
     return replace(proposal, metadata=metadata)
+
+
+def _normalize_new_duplicate_commitment(
+    proposal: Proposal,
+    existing_by_id: dict[str, Proposal],
+    *,
+    normalized_at: datetime,
+) -> tuple[Proposal, tuple[Proposal, ...]]:
+    if not _is_duplicate_commitment_candidate(proposal):
+        return proposal, ()
+    duplicates = tuple(
+        existing
+        for existing in existing_by_id.values()
+        if _same_duplicate_commitment(existing, proposal)
+    )
+    if not duplicates:
+        return proposal, ()
+
+    group = (*duplicates, proposal)
+    canonical = _canonical_duplicate_commitment(group)
+    updates: list[Proposal] = []
+    if canonical.proposal_id == proposal.proposal_id:
+        merged_ids = tuple(item.proposal_id for item in duplicates)
+        next_proposal = _with_merged_duplicate_ids(proposal, merged_ids, normalized_at=normalized_at)
+        updates.extend(
+            _mark_merged_duplicate(
+                duplicate,
+                canonical=next_proposal,
+                normalized_at=normalized_at,
+                reason="same_title_date_time_task_event_duplicate",
+            )
+            for duplicate in duplicates
+        )
+        return next_proposal, tuple(updates)
+
+    merged_new = _mark_merged_duplicate(
+        proposal,
+        canonical=canonical,
+        normalized_at=normalized_at,
+        reason="same_title_date_time_duplicate_of_existing",
+    )
+    updates.append(_with_merged_duplicate_ids(canonical, (proposal.proposal_id,), normalized_at=normalized_at))
+    return merged_new, tuple(updates)
+
+
+def _normalize_duplicate_commitments(
+    by_id: dict[str, Proposal],
+    *,
+    normalized_at: datetime,
+) -> tuple[Proposal, ...]:
+    groups: dict[tuple[str, date, str], list[Proposal]] = {}
+    for proposal in by_id.values():
+        if not _is_duplicate_commitment_candidate(proposal):
+            continue
+        date_value = _commitment_date(proposal)
+        if date_value is None:
+            continue
+        groups.setdefault((_normalize_title(proposal.title), date_value, _normalize_time_window(proposal.time_window)), []).append(
+            proposal
+        )
+
+    updates: dict[str, Proposal] = {}
+    for proposals in groups.values():
+        if len(proposals) < 2:
+            continue
+        task_event_pairs = [
+            proposal
+            for proposal in proposals
+            if any(_same_duplicate_commitment(proposal, other) for other in proposals if other.proposal_id != proposal.proposal_id)
+        ]
+        if len(task_event_pairs) < 2:
+            continue
+        canonical = _canonical_duplicate_commitment(tuple(task_event_pairs))
+        duplicate_ids = tuple(item.proposal_id for item in task_event_pairs if item.proposal_id != canonical.proposal_id)
+        updates[canonical.proposal_id] = _with_merged_duplicate_ids(
+            canonical,
+            duplicate_ids,
+            normalized_at=normalized_at,
+        )
+        for duplicate in task_event_pairs:
+            if duplicate.proposal_id == canonical.proposal_id:
+                continue
+            updates[duplicate.proposal_id] = _mark_merged_duplicate(
+                duplicate,
+                canonical=canonical,
+                normalized_at=normalized_at,
+                reason="same_title_date_time_task_event_duplicate",
+            )
+    return tuple(updates.values())
+
+
+def _is_duplicate_commitment_candidate(proposal: Proposal) -> bool:
+    if proposal.status not in {"draft", "approved", "applied"}:
+        return False
+    if proposal.kind not in {"task", "event"}:
+        return False
+    if proposal.metadata.get("merged_into_proposal_id"):
+        return False
+    if parent_proposal_id(proposal):
+        return False
+    if proposal.metadata.get(WORKFLOW_ROLE_KEY) == WORKFLOW_PARENT_ROLE:
+        return False
+    return bool(proposal.title.strip() and _commitment_date(proposal))
+
+
+def _same_duplicate_commitment(left: Proposal, right: Proposal) -> bool:
+    if left.proposal_id == right.proposal_id:
+        return False
+    if not (_is_duplicate_commitment_candidate(left) and _is_duplicate_commitment_candidate(right)):
+        return False
+    if {left.kind, right.kind} != {"task", "event"}:
+        return False
+    if not _same_normalized_title(left.title, right.title):
+        return False
+    if _commitment_date(left) != _commitment_date(right):
+        return False
+    left_time = _normalize_time_window(left.time_window)
+    right_time = _normalize_time_window(right.time_window)
+    return bool(left_time and right_time and left_time == right_time)
+
+
+def _canonical_duplicate_commitment(proposals: tuple[Proposal, ...]) -> Proposal:
+    return sorted(proposals, key=_duplicate_commitment_rank, reverse=True)[0]
+
+
+def _duplicate_commitment_rank(proposal: Proposal) -> tuple[int, int, datetime, str]:
+    updated_at = proposal.updated_at or proposal.created_at or datetime.min
+    return (
+        1 if proposal.kind == "event" and proposal.scheduled_date is not None else 0,
+        1 if proposal.status in {"approved", "applied"} else 0,
+        updated_at,
+        proposal.proposal_id,
+    )
+
+
+def _with_merged_duplicate_ids(
+    proposal: Proposal,
+    duplicate_ids: tuple[str, ...],
+    *,
+    normalized_at: datetime,
+) -> Proposal:
+    metadata = dict(proposal.metadata)
+    merged = metadata.get("merged_duplicate_proposal_ids", "")
+    for proposal_id in duplicate_ids:
+        merged = _append_csv_value(merged, proposal_id)
+    if not merged:
+        return proposal
+    metadata["merged_duplicate_proposal_ids"] = merged
+    metadata["duplicate_commitment_normalized_at"] = normalized_at.isoformat(timespec="seconds")
+    return replace(proposal, metadata=metadata, updated_at=normalized_at)
+
+
+def _mark_merged_duplicate(
+    duplicate: Proposal,
+    *,
+    canonical: Proposal,
+    normalized_at: datetime,
+    reason: str,
+) -> Proposal:
+    metadata = dict(duplicate.metadata)
+    metadata.setdefault("merged_original_status", duplicate.status)
+    metadata.setdefault("merged_original_kind", duplicate.kind)
+    if duplicate.due_date:
+        metadata.setdefault("merged_original_due_date", duplicate.due_date.isoformat())
+    if duplicate.scheduled_date:
+        metadata.setdefault("merged_original_scheduled_date", duplicate.scheduled_date.isoformat())
+    if duplicate.time_window:
+        metadata.setdefault("merged_original_time_window", duplicate.time_window)
+    metadata["merged_into_proposal_id"] = canonical.proposal_id
+    metadata["merged_into_title"] = canonical.title
+    metadata["merged_reason"] = reason
+    metadata["duplicate_commitment_normalized_at"] = normalized_at.isoformat(timespec="seconds")
+    return replace(
+        duplicate,
+        status="rejected",
+        required_approvers=(),
+        approvals=(),
+        missing_slots=(),
+        metadata=metadata,
+        updated_at=normalized_at,
+    )
+
+
+def _commitment_date(proposal: Proposal) -> date | None:
+    return proposal.scheduled_date or proposal.due_date
+
+
+def _normalize_time_window(value: str) -> str:
+    return re.sub(r"\s+", "", value.strip().lower())
 
 
 def _promote_root_if_needed(

@@ -229,6 +229,20 @@ class TeamTaskOrchestrator:
             self._persist_graph_normalization(normalization.updated_existing, message=message)
             existing_proposals = _merge_existing_proposals(existing_proposals, normalization.updated_existing)
             proposal = normalization.proposals[0]
+            if _is_merged_duplicate_proposal(proposal):
+                self.store.save_proposal(proposal)
+                self.store.append_event(
+                    "proposal.merged_duplicate",
+                    {
+                        "proposal": proposal,
+                        "message_id": message.message_id,
+                        "merged_into_proposal_id": proposal.metadata.get("merged_into_proposal_id", ""),
+                    },
+                    occurred_at=message.received_at,
+                )
+                proposals.append(proposal)
+                existing_proposals = (*existing_proposals, proposal)
+                continue
             if is_workflow_child(proposal) and (
                 explicit_relation or proposal.metadata.get("workflow_relation_normalized") == "true"
             ):
@@ -2285,6 +2299,10 @@ def _merge_existing_proposals(
     for update in updates:
         by_id[update.proposal_id] = update
     return tuple(by_id.values())
+
+
+def _is_merged_duplicate_proposal(proposal: Proposal) -> bool:
+    return proposal.status == "rejected" and bool(proposal.metadata.get("merged_into_proposal_id"))
 
 
 def _child_needs_separate_workflow_approval(proposal: Proposal) -> bool:

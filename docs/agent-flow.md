@@ -30,6 +30,7 @@ The older flow treated the semantic decision as mostly create/update followed by
 4. **Linked completion.** When a semantic completion update closes one scheduled event, related scheduled commitments in the same slot can be completed and linked as completion evidence.
 5. **Surface rollup.** Slack Home, briefings, and the web dashboard anchor child items under workflow context parents, suppress parent-only dates/overdue flags, show only the two most recent completed children, and show hidden-completed counts.
 6. **Outbound dedupe audit.** Duplicate outbound Slack cards are skipped through stable dedupe keys and now emit an explicit `slack.message.skipped` audit event with reason `duplicate_dedupe_key`.
+7. **Task/event commitment collapse.** If the same commitment is represented twice as a task and an event with the same normalized title, date, and time window, the normalizer keeps one canonical visible proposal and marks the duplicate as a rejected merge record with `merged_into_proposal_id`.
 
 ## Runtime intervention points
 
@@ -39,7 +40,7 @@ The older flow treated the semantic decision as mostly create/update followed by
 | Context assembly | `task_management/orchestrator.py`, `task_management/semantic_context.py`, `task_management/store.py` | Deterministic code | The orchestrator loads active proposals, pending approvals, relations, recent audit evidence, and current workflow context. |
 | Semantic decision | `task_management/codex_operating_agent.py`, `task_management/claude_code_operating_agent.py`, `task_management/openai_operating_agent.py`, `task_management/operating_agent_prompt.py` | Codex / Claude / OpenAI semantic agent | The agent classifies no-action vs create vs update vs clarification, chooses semantic target candidates, and returns a strict JSON envelope. It is explicitly instructed to prefer stable workflow roots for event lifecycles. |
 | Envelope and policy gate | `task_management/orchestrator.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py` | Deterministic code | Invalid decisions are refused; missing slots, approval requirements, risky auto-approval, and conflicts are handled before state changes. |
-| Workflow graph normalization | `task_management/workflow_normalizer.py`, `task_management/orchestrator.py`, `task_management/relations.py` | Deterministic code, seeded by semantic evidence | New drafts and selected existing graphs are normalized around canonical workflow roots, parent/child relations, dependency edges, and linked completion evidence. |
+| Workflow graph normalization | `task_management/workflow_normalizer.py`, `task_management/orchestrator.py`, `task_management/relations.py` | Deterministic code, seeded by semantic evidence | New drafts and selected existing graphs are normalized around canonical workflow roots, parent/child relations, dependency edges, linked completion evidence, and task/event duplicate commitments. |
 | State and history | `task_management/store.py`, `task_management/timeline.py`, `task_management/backfill_report.py` | Deterministic code | Proposals, approval requests, parent/child metadata, dependencies, timeline entries, outbound deliveries, and audit JSONL events are stored locally. |
 | Human surfaces | `task_management/slack_home.py`, `task_management/secretary.py`, `task_management/frontend.py`, `task_management/human_view.py`, `task_management/work_item_state.py` | Deterministic renderer | Slack replies, Slack Home, morning/afternoon/EOD briefings, and dashboard pages render hierarchy-aware work items with overdue sorting and compact completed-child display. |
 | External preview | `task_management/task_core_bridge.py` | Deterministic bridge | The repo builds and validates preview-only `task-core.export.v1` payloads. It does not write task-core inbox/raw/wiki state. |
@@ -85,8 +86,11 @@ flowchart TD
   I --> J[Reparent follow-up deliverables under root]
   J --> K[Preserve completed decision as dependency]
   H -->|No| L[Keep standalone proposal shape]
-  K --> M[Approval / conflict policy]
-  L --> M
+  K --> X{Same title/date/time task-event duplicate?}
+  L --> X
+  X -->|Yes| Y[Keep canonical proposal and reject merged duplicate]
+  X -->|No| M[Approval / conflict policy]
+  Y --> M
   M --> N[Persist proposals and audit events]
 ```
 
@@ -108,13 +112,36 @@ flowchart TD
   H --> I[Create synthetic workflow containers when safe]
   H --> J[Repair parent/dependency metadata]
   H --> K[Link completion sources]
+  H --> X[Collapse same-slot task/event duplicates]
   I --> L[Persist created/updated proposals]
   J --> L
   K --> L
+  X --> L
   L --> M[workflow.backfill.* audit events]
 ```
 
 Backfill is deliberately more conservative than new-input normalization. It repairs already-linked workflow subtrees, canonical event roots, multi-parent metadata, dependency-only workflow containers, and linked completion evidence. It should not sweep unrelated historical tasks under a workflow based only on weak keyword overlap.
+
+## Task/event duplicate commitment collapse
+
+```mermaid
+flowchart TD
+  A[Candidate proposal] --> B{Kind is task or event?}
+  B -->|No| C[Leave unchanged]
+  B -->|Yes| D{Has title, commitment date, and time window?}
+  D -->|No| C
+  D -->|Yes| E[Normalize title and time window]
+  E --> F{Task/event pair matches same title/date/time?}
+  F -->|No| C
+  F -->|Yes| G[Rank canonical proposal]
+  G --> H[Prefer scheduled event, approved/applied state, latest update]
+  H --> I[Keep canonical visible]
+  H --> J[Mark duplicate rejected with merged_into_proposal_id]
+  I --> K[Store merged_duplicate_proposal_ids]
+  J --> L[Preserve original status/kind/date/time in metadata]
+```
+
+This rule is intentionally narrow. It does not merge arbitrary similarly named work. It only collapses a visible duplicate when one proposal is a task, the other is an event, and both point to the same normalized title, same date, and same non-empty time window. New-input normalization runs this check before approval/outbound handling so a duplicate incoming proposal is stored as audit history instead of creating another approval card. Existing-state backfill runs the same check so old task/event splits converge to the same single visible commitment model.
 
 ## Completion and linked scheduled commitments
 
