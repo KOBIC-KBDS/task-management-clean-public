@@ -158,6 +158,43 @@ def test_orchestrator_applies_multiple_high_confidence_semantic_patches(tmp_path
     assert [event["type"] for event in events].count("proposal.approved") == 2
 
 
+def test_orchestrator_applies_semantic_rejection_to_pending_approval(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    proposal, request = _pending("검색 페이지 방향 아이디어 요청", "proposal/search-page", "approval/search-page")
+    _seed(store, proposal, request)
+    agent = StaticPatchAgent(
+        (
+            ProposalPatch(
+                request_id=request.request_id,
+                proposal_id=proposal.proposal_id,
+                actor_id="me",
+                body="거절",
+                temporal_update={"status": "rejected", "semantic_update_type": "approval_rejection"},
+                reason="explicit_user_rejection",
+                target_confidence=0.99,
+                evidence_text="거절",
+            ),
+        )
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=agent).handle_message(_message("거절"))
+
+    assert result.proposals[0].status == "rejected"
+    assert result.approval_requests[0].status == "rejected"
+    rejected = store.get_proposal("proposal/search-page")
+    rejected_request = store.get_approval_request("approval/search-page")
+    assert rejected is not None
+    assert rejected.status == "rejected"
+    assert rejected.missing_slots == ()
+    assert rejected.required_approvers == ()
+    assert rejected_request is not None
+    assert rejected_request.status == "rejected"
+    events = [event["type"] for event in store.read_events()]
+    assert "agent.patch.accepted" in events
+    assert "approval.rejected" in events
+    assert "proposal.rejected" in events
+
+
 def test_orchestrator_rejects_low_confidence_semantic_patch_without_mutating(tmp_path: Path) -> None:
     store = _store(tmp_path)
     proposal, request = _pending("어느 작업인지 헷갈리는 일정", "proposal/ambiguous", "approval/ambiguous")

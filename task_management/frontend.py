@@ -1206,6 +1206,8 @@ def _preview_counts(
 def _preview_status(proposal: Proposal, applied_export: dict[str, str] | None = None) -> str:
     if applied_export is not None or proposal.status == "applied":
         return "applied"
+    if proposal.status in {"rejected", "done"}:
+        return "excluded"
     if proposal.status == "approved" and not proposal.missing_slots:
         return "ready"
     if proposal.status in {"draft", "posted", "awaiting_approval"} or proposal.kind == "question" or proposal.missing_slots:

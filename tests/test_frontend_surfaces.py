@@ -141,21 +141,43 @@ def test_web_task_page_exposes_preview_readiness_and_applied_exports(tmp_path) -
         "task_management-preview-001",
         applied_at=NOW.replace(hour=11),
     )
+    rejected = Proposal(
+        proposal_id="codex/slack/DTEST/preview-rejected/1",
+        source_message_id="slack/DTEST/preview-rejected",
+        proposer_id="me",
+        title="거절된 질문",
+        raw_text="거절된 질문",
+        kind="question",
+        status="rejected",
+        assigned_to="me",
+        task_management_area="general",
+        discussion_id="slack/DTEST",
+        message_id="slack/DTEST/preview-rejected",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    sim.store.save_proposal(rejected)
 
     model = build_web_task_page_model(sim.store, today=date(2026, 5, 5))
 
     assert model["preview_counts"]["ready"] == 1
     assert model["preview_counts"]["blocked"] == 1
     assert model["preview_counts"]["applied"] == 1
+    assert model["preview_counts"]["excluded"] >= 1
     ready_item = next(item for item in model["sections"]["this_week"] if item["proposal_id"] == approved.proposal_id)
     blocked_item = next(item for item in model["sections"]["questions"] if item["proposal_id"] == pending.proposal_id)
     applied_item = next(item for item in model["sections"]["this_week"] if item["proposal_id"] == applied.proposal_id)
+    rejected_item = next(
+        item for item in model["sections"]["questions"] if item["proposal_id"] == rejected.proposal_id
+    )
     assert ready_item["preview_status"] == "ready"
     assert ready_item["preview_label"] == "export 후보"
     assert blocked_item["preview_status"] == "blocked"
     assert blocked_item["preview_label"] == "확인 필요"
     assert applied_item["preview_status"] == "applied"
     assert applied_item["export_item_id"] == "task_management-preview-001"
+    assert rejected_item["preview_status"] == "excluded"
+    assert rejected_item["preview_label"] == "preview 제외"
 
     html = render_web_task_page_html(model)
     assert "Export 후보" in html

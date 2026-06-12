@@ -208,6 +208,10 @@ def _segment_to_candidate(
     if assigned_to == "unassigned":
         assigned_to = _assignee_from_participants(metadata.get("participants", ""))
     item_type = _infer_item_type(segment, metadata=metadata, scheduled_date=scheduled_date)
+    if item_type == "event" and assigned_to in {"me", "teammate"} and not any(
+        metadata.get(key) for key in ("participants", "external_participants", "participant_label", "attendees")
+    ):
+        metadata["participants"] = assigned_to
     if item_type == "event" and time_window in {"lunch", "noon", "점심"}:
         metadata["needs_exact_time"] = "true"
     return TeamTaskTaskCandidate(
@@ -276,6 +280,8 @@ def _infer_assignee(text: str, *, speaker: str) -> str:
         return _speaker_person(normalized_speaker)
     if _is_blocking_away_context(text):
         return _speaker_person(normalized_speaker)
+    if _is_event_context(text):
+        return _speaker_person(normalized_speaker)
     if "해줘" in text or "해주세요" in text or "사줘" in text or "잡아줘" in text:
         return _other_person(normalized_speaker)
     return "unassigned"
@@ -312,6 +318,8 @@ def _extract_dates(text: str, *, reference_date: date) -> tuple[date | None, dat
     time_window = _extract_time_window(text)
 
     if parsed_date is None:
+        if time_window and _is_event_context(text):
+            return None, reference_date, time_window
         return None, None, time_window
     if _is_event_context(text) or "오전" in text or "오후" in text or "저녁" in text:
         return None, parsed_date, time_window
@@ -319,14 +327,16 @@ def _extract_dates(text: str, *, reference_date: date) -> tuple[date | None, dat
 
 
 def _extract_time_window(text: str) -> str:
-    clock = re.search(r"(?:(오전|오후|저녁|밤)\s*)?(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분)?", text)
+    clock = re.search(r"(?:(오전|오후|저녁|밤)\s*)?(\d{1,2})\s*시(?:\s*(?:(\d{1,2})\s*분|반))?", text)
     if clock:
         hour = int(clock.group(2))
-        minute = int(clock.group(3) or 0)
+        minute = 30 if "반" in clock.group(0) and clock.group(3) is None else int(clock.group(3) or 0)
         marker = clock.group(1) or ""
         if marker in {"오후", "저녁", "밤"} and hour < 12:
             hour += 12
         if not marker and hour <= 7 and any(token in text for token in ("퇴근", "저녁", "밤")):
+            hour += 12
+        if not marker and hour <= 7 and _is_event_context(text):
             hour += 12
         if marker == "오전" and hour == 12:
             hour = 0
@@ -437,6 +447,7 @@ def _title_from_segment(segment: str) -> str:
     title = re.sub(r"(이번\s*주|이번주|다음\s*주|다음주)\s*(안에|까지)", "", title)
     title = re.sub(r"(오늘|내일|모레|이번\s*주|이번주|다음\s*주|다음주)\s*[월화수목금토일]?(까지|으로|에)?", "", title)
     title = re.sub(r"\d{4}-\d{2}-\d{2}(까지|으로|에)?", "", title)
+    title = re.sub(r"(?:(?:오전|오후|저녁|밤)\s*)?\d{1,2}\s*시(?:\s*(?:\d{1,2}\s*분|반))?\s*(?:에|부터)?", "", title)
     title = title.replace("오전으로", "").replace("오후로", "").replace("저녁으로", "")
     title = re.sub(r"^(내가|제가|당신은|당신이|여보가|우리|같이)\s*", "", title)
     replacements = (
@@ -535,8 +546,16 @@ def _extract_location(text: str) -> str:
         location = explicit.group(1).strip(" ,.")
         if location and not any(token in location for token in ("필요하지", "필요 없어", "필요없", "상관없")):
             return location
+    after_clock_place = re.search(
+        r"(?:(?:오전|오후|저녁|밤)\s*)?\d{1,2}\s*시(?:\s*(?:\d{1,2}\s*분|반))?\s*(?:에|부터)?\s*([^,.。\n]{1,30}?)(?:에서|에)\s*",
+        text,
+    )
+    if after_clock_place:
+        location = after_clock_place.group(1).strip(" ,.")
+        if location and not _looks_like_time_suffix(location):
+            return location
     after_clock = re.search(
-        r"(?:(?:오전|오후|저녁|밤)\s*)?\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?\s*([^,.。\n]+)",
+        r"(?:(?:오전|오후|저녁|밤)\s*)?\d{1,2}\s*시(?:\s*(?:\d{1,2}\s*분|반))?\s*([^,.。\n]+)",
         text,
     )
     if after_clock:

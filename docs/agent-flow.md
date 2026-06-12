@@ -2,7 +2,7 @@
 
 This document is the curated runtime map for the clean public task-management repository. It explains where a semantic CLI agent intervenes, where deterministic code takes over, and how the current workflow/hierarchy rules reshape tasks after the agent returns a decision.
 
-For a rendered version of this document, open [`docs/agent-flow.html`](agent-flow.html). For a playable animation, open [`docs/agent-flow-demo/index.html`](agent-flow-demo/index.html). For static code inventory evidence, start at [`docs/codeboarding/README.md`](codeboarding/README.md). This page is different: it is the operator-facing control-flow and policy map.
+For a rendered version of this document, open [`docs/agent-flow.html`](agent-flow.html). For a playable animation, open [`docs/agent-flow-demo/index.html`](agent-flow-demo/index.html). For static code inventory evidence, start at [`docs/codeboarding/README.md`](codeboarding/README.md). For cross-agent refactoring handoffs, read and update [`docs/shared-context.md`](shared-context.md). This page is different: it is the operator-facing control-flow and policy map.
 
 ## Current one-line model
 
@@ -31,6 +31,8 @@ The older flow treated the semantic decision as mostly create/update followed by
 5. **Surface rollup.** Slack Home, briefings, and the web dashboard anchor child items under workflow context parents, suppress parent-only dates/overdue flags, show only the two most recent completed children, and show hidden-completed counts.
 6. **Outbound dedupe audit.** Duplicate outbound Slack cards are skipped through stable dedupe keys and now emit an explicit `slack.message.skipped` audit event with reason `duplicate_dedupe_key`.
 7. **Task/event commitment collapse.** If the same commitment is represented twice as a task and an event with the same normalized title, date, and time window, the normalizer keeps one canonical visible proposal and marks the duplicate as a rejected merge record with `merged_into_proposal_id`.
+8. **Pending-card hijack protection.** A lone pending clarification no longer owns every later private message. The deterministic layer accepts explicit rejections, checks semantic target evidence, and reroutes unrelated meeting-like patches through new-work intake.
+9. **Shared engineering memory.** Refactoring handoffs should update `docs/shared-context.md` with public-safe decisions, verification, and watchpoints so Codex, Claude Code, and human maintainers share the same current context.
 
 ## Runtime intervention points
 
@@ -39,7 +41,7 @@ The older flow treated the semantic decision as mostly create/update followed by
 | Intake | `task_management/cli.py`, `task_management/slack_socket.py`, `task_management/slack_adapter.py` | Deterministic adapter | Socket Mode, polling, fixture, and CLI commands become `IncomingMessage` objects. Outbound Slack send/queue paths use stable dedupe keys. |
 | Context assembly | `task_management/orchestrator.py`, `task_management/semantic_context.py`, `task_management/store.py` | Deterministic code | The orchestrator loads active proposals, pending approvals, relations, recent audit evidence, and current workflow context. |
 | Semantic decision | `task_management/codex_operating_agent.py`, `task_management/claude_code_operating_agent.py`, `task_management/openai_operating_agent.py`, `task_management/operating_agent_prompt.py` | Codex / Claude / OpenAI semantic agent | The agent classifies no-action vs create vs update vs clarification, chooses semantic target candidates, and returns a strict JSON envelope. It is explicitly instructed to prefer stable workflow roots for event lifecycles. |
-| Envelope and policy gate | `task_management/orchestrator.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py` | Deterministic code | Invalid decisions are refused; missing slots, approval requirements, risky auto-approval, and conflicts are handled before state changes. |
+| Envelope and policy gate | `task_management/orchestrator.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py` | Deterministic code | Invalid decisions are refused; target evidence, missing slots, approval requirements, risky auto-approval, and conflicts are handled before state changes. Explicit semantic rejection patches close approvals; low-evidence unrelated patches are rerouted as new work. |
 | Workflow graph normalization | `task_management/workflow_normalizer.py`, `task_management/orchestrator.py`, `task_management/relations.py` | Deterministic code, seeded by semantic evidence | New drafts and selected existing graphs are normalized around canonical workflow roots, parent/child relations, dependency edges, linked completion evidence, and task/event duplicate commitments. |
 | State and history | `task_management/store.py`, `task_management/timeline.py`, `task_management/backfill_report.py` | Deterministic code | Proposals, approval requests, parent/child metadata, dependencies, timeline entries, outbound deliveries, and audit JSONL events are stored locally. |
 | Human surfaces | `task_management/slack_home.py`, `task_management/secretary.py`, `task_management/frontend.py`, `task_management/human_view.py`, `task_management/work_item_state.py` | Deterministic renderer | Slack replies, Slack Home, morning/afternoon/EOD briefings, and dashboard pages render hierarchy-aware work items with overdue sorting and compact completed-child display. |
@@ -93,6 +95,34 @@ flowchart TD
   Y --> M
   M --> N[Persist proposals and audit events]
 ```
+
+## Semantic target safety flow
+
+```mermaid
+flowchart TD
+  A[Incoming message with pending approvals] --> B[Semantic agent returns patch]
+  B --> C{Patch is explicit approval rejection?}
+  C -->|Yes| D[Close approval request and proposal as rejected]
+  C -->|No| E{Target confidence and evidence pass?}
+  E -->|No| F[Reject patch without mutating target]
+  E -->|Yes| G{Looks like unrelated new work?}
+  G -->|No| H[Apply feedback to target]
+  G -->|Yes| I[Audit target_mismatch_new_work]
+  I --> J[Run new-work intake without pending request pressure]
+  J --> K[Create standalone task/event if parser finds one]
+  D --> L[Render surfaces without missing-slot pressure]
+  F --> L
+  H --> L
+  K --> L
+```
+
+Practical interpretation:
+
+- A reply such as `reject approval/...` or a semantic `status=rejected` patch is a terminal approval decision, not an unsupported status update.
+- A message with a concrete time/place and meeting-like wording must not mutate an unrelated pending question unless it also carries credible target evidence.
+- If the semantic agent over-targets the pending card, deterministic code records the mismatch and gives the same message a second chance as a new item.
+- Rejected and done proposals are excluded from task-core preview readiness rather than appearing as blocked work.
+- Plain `question` proposals do not need dates unless the source item explicitly asks for exact-date resolution.
 
 ### Practical interpretation
 
@@ -216,6 +246,13 @@ The semantic agent should answer these questions and return them through the str
 - What evidence text and confidence support the decision?
 
 The deterministic layer then decides whether the envelope is valid, whether approval is required, whether hierarchy should be normalized, and what should be persisted.
+
+When refactoring this contract, update `docs/shared-context.md` with:
+
+- the decision you changed,
+- why deterministic safety still holds,
+- which tests prove it,
+- and any watchpoints for the next Codex or Claude Code session.
 
 ## Backend choices
 

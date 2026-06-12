@@ -135,6 +135,44 @@ class NoActionSourceAgent:
         )
 
 
+class MisroutedSinglePendingPatchAgent:
+    def __init__(self, request_id: str, proposal_id: str) -> None:
+        self.request_id = request_id
+        self.proposal_id = proposal_id
+        self.calls = 0
+
+    def decide(
+        self,
+        message: IncomingMessage,
+        *,
+        pending_approval_requests: Sequence[ApprovalRequest],
+        pending_proposals: Sequence[Proposal],
+    ) -> OperatingAgentDecision:
+        self.calls += 1
+        return OperatingAgentDecision(
+            action="apply_feedback",
+            source="codex_cli",
+            confidence=0.88,
+            rationale="Regression fixture: semantic layer tried to resolve unrelated new meeting against the lone pending card.",
+            proposal_patches=(
+                ProposalPatch(
+                    request_id=self.request_id,
+                    proposal_id=self.proposal_id,
+                    actor_id=message.sender_id,
+                    body=message.text,
+                    temporal_update={
+                        "time_window": "13:30",
+                        "location": "회의실",
+                        "semantic_update_type": "correction",
+                    },
+                    reason="resolve_pending_question_partial_slots",
+                    target_confidence=0.78,
+                    evidence_text=message.text,
+                ),
+            ),
+        )
+
+
 def _store(root: Path) -> TeamTaskStore:
     return TeamTaskStore(root / "task_management.sqlite3", root / "events.jsonl")
 
@@ -499,7 +537,47 @@ def test_action_word_overlap_does_not_hijack_single_pending_question(tmp_path: P
     assert terms.metadata.get("last_resolution_update_message_id", "") == ""
 
 
-@pytest.mark.parametrize("source", ["codex_cli", "openai_responses", "claude_code_cli"])
+def test_semantic_single_pending_mismatch_falls_back_to_new_meeting_creation(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    s8 = _pending(
+        "검색 페이지 방향 아이디어 요청",
+        "proposal/search-page",
+        "approval/search-page",
+        missing_slots=("date",),
+    )
+    _save_pending(store, s8, "approval/search-page")
+    agent = MisroutedSinglePendingPatchAgent("approval/search-page", "proposal/search-page")
+
+    result = TeamTaskOrchestrator(store, operating_agent=agent).handle_message(
+        _message("1시 반에 회의실에서 외부 연락 후속 회의", ts="1000.000012")
+    )
+
+    assert agent.calls == 1
+    unchanged = store.get_proposal("proposal/search-page")
+    unchanged_request = store.get_approval_request("approval/search-page")
+    assert unchanged is not None
+    assert unchanged.status == "awaiting_approval"
+    assert unchanged.time_window == ""
+    assert unchanged.metadata.get("location", "") == ""
+    assert unchanged_request is not None
+    assert unchanged_request.status == "pending"
+
+    created = [proposal for proposal in result.proposals if proposal.proposal_id != "proposal/search-page"]
+    assert len(created) == 1
+    meeting = created[0]
+    assert meeting.kind == "event"
+    assert meeting.status == "approved"
+    assert meeting.scheduled_date == date(2026, 5, 19)
+    assert meeting.time_window == "13:30"
+    assert meeting.metadata["location"] == "회의실"
+    assert meeting.metadata["participants"] == "me"
+    event_types = [event["type"] for event in store.read_events()]
+    assert "agent.patch.rejected" in event_types
+    assert "agent.feedback_reinterpreted_as_new_work" in event_types
+    assert "proposal.created" in event_types
+
+
+@pytest.mark.parametrize("source", ["codex_cli", "claude_code_cli", "openai_responses"])
 def test_trusted_semantic_no_action_prevents_state_linked_fallback(tmp_path: Path, source: str) -> None:
     store = _store(tmp_path)
     _save_pending(

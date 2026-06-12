@@ -33,6 +33,8 @@ def _clear_local_loader_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_chat_command_parser_supports_korean_reply_commands() -> None:
     accepted = parse_chat_command("수락 approval/abc123")
     rejected = parse_chat_command("거절 approval/abc123")
+    rejected_code = parse_chat_command("`거절 approval/abc123`")
+    rejected_bold = parse_chat_command("*거절 approval/abc123*")
     changed = parse_chat_command("변경 approval/abc123 다음주 수요일 오후")
     completed = parse_chat_command("완료 task_management/abc123")
     assigned = parse_chat_command("담당 task_management/abc123 팀원")
@@ -42,6 +44,10 @@ def test_chat_command_parser_supports_korean_reply_commands() -> None:
     assert accepted.target_id == "approval/abc123"
     assert rejected is not None
     assert rejected.action == "reject"
+    assert rejected_code is not None
+    assert rejected_code.action == "reject"
+    assert rejected_bold is not None
+    assert rejected_bold.action == "reject"
     assert changed is not None
     assert changed.action == "change"
     assert changed.body == "다음주 수요일 오후"

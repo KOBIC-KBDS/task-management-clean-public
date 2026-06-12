@@ -137,6 +137,27 @@ def test_slot_validator_is_reusable_for_candidates_and_persisted_proposals() -> 
     assert missing_slots_for_proposal(proposal) == ("time", "location")
 
 
+def test_slot_validator_does_not_require_date_for_plain_questions() -> None:
+    candidate = TeamTaskTaskCandidate(
+        source_key="candidate/question-no-date",
+        raw_text="검색 페이지 방향 아이디어 요청",
+        title="검색 페이지 방향 아이디어 요청",
+        discussion_id="slack/DTEST",
+        message_id="slack/DTEST/1000.000010/1",
+        line_number=1,
+        assigned_to="me",
+        item_type="question",
+    )
+
+    assert missing_slots_for_candidate(candidate, assigned_to="me") == ()
+
+    proposal = proposal_from_candidate(candidate, message=_message())
+
+    assert proposal.kind == "question"
+    assert proposal.missing_slots == ()
+    assert missing_slots_for_proposal(proposal) == ()
+
+
 def test_slot_validator_requires_exact_time_for_lunch_events() -> None:
     candidate = TeamTaskTaskCandidate(
         source_key="candidate/lunch",

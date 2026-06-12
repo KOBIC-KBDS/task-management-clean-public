@@ -45,6 +45,7 @@ def proposal_from_candidate(candidate: TeamTaskTaskCandidate, *, message: Incomi
             **source_metadata(message.message_id),
             **intake_metadata(message),
             "source_text_hash": text_hash(candidate.raw_text),
+            "source_item_type": candidate.item_type,
             "parser_assigned_to": candidate.assigned_to,
         },
     )

@@ -32,7 +32,7 @@ def missing_slots_for_candidate(candidate: TeamTaskTaskCandidate, *, assigned_to
         if not candidate.metadata.get("location") and candidate.metadata.get("location_optional") != "true":
             missing.append("location")
     if (
-        candidate.item_type not in {"reference", "routine", "decision"}
+        candidate.item_type not in {"reference", "routine", "decision", "question"}
         and candidate.disposition != "decision_pending"
         and candidate.due_date is None
         and candidate.scheduled_date is None
@@ -61,14 +61,21 @@ def missing_slots_for_proposal(proposal: Proposal) -> tuple[str, ...]:
             if not value or (key == "time_window" and _is_unknown_time(value)):
                 missing.append(slot)
         return _dedupe(missing)
-    if proposal.kind == "event" or (proposal.kind == "question" and proposal.scheduled_date is not None):
+    if proposal.kind == "event" or (
+        proposal.kind == "question" and proposal.scheduled_date is not None and not _is_source_question(proposal)
+    ):
         if not has_participant_metadata(proposal.metadata):
             missing.append("participants")
         if _requires_exact_time(proposal.metadata, proposal.time_window):
             missing.append("time")
         if not proposal.metadata.get("location") and proposal.metadata.get("location_optional") != "true":
             missing.append("location")
-    if proposal.kind not in {"reference", "routine", "decision"} and proposal.due_date is None and proposal.scheduled_date is None:
+    if (
+        proposal.kind not in {"reference", "routine", "decision"}
+        and not _is_source_question(proposal)
+        and proposal.due_date is None
+        and proposal.scheduled_date is None
+    ):
         if "exact_date" not in missing:
             missing.append("date")
     return _dedupe(missing)
@@ -96,6 +103,10 @@ def _is_unknown_time(value: str) -> bool:
 
 def has_participant_metadata(metadata: dict[str, str]) -> bool:
     return any(metadata.get(key) for key in ("participants", "external_participants", "participant_label", "attendees"))
+
+
+def _is_source_question(proposal: Proposal) -> bool:
+    return proposal.kind == "question" and proposal.metadata.get("source_item_type") == "question"
 
 
 def _dedupe(items: list[str]) -> tuple[str, ...]:

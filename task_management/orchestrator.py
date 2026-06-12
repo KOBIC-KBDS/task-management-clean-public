@@ -165,7 +165,38 @@ class TeamTaskOrchestrator:
             requests.extend(feedback_result.approval_requests)
             outbound.extend(feedback_result.outbound_messages)
             if decision.action == "apply_feedback" and not decision.proposal_drafts:
-                return feedback_result
+                if _should_reinterpret_rejected_feedback_as_new_work(feedback_result):
+                    outbound = [
+                        message
+                        for message in outbound
+                        if message.card.get("reason") != "target_mismatch_new_work"
+                    ]
+                    self.store.append_event(
+                        "agent.feedback_reinterpreted_as_new_work",
+                        {
+                            "message_id": message.message_id,
+                            "reason": "target_mismatch_new_work",
+                        },
+                        occurred_at=message.received_at,
+                    )
+                    decision = RuleBasedTeamTaskOperatingAgent().decide(
+                        message,
+                        pending_approval_requests=(),
+                        pending_proposals=self.store.list_proposals(),
+                    )
+                    self.store.append_event(
+                        "agent.decision.created",
+                        {"decision": decision_to_payload(decision), "fallback_after": "target_mismatch_new_work"},
+                        occurred_at=message.received_at,
+                    )
+                    if not decision.proposal_drafts:
+                        return OrchestrationResult(
+                            proposals=tuple(proposals),
+                            approval_requests=tuple(requests),
+                            outbound_messages=tuple(outbound),
+                        )
+                else:
+                    return feedback_result
         if decision.clarification_questions:
             return OrchestrationResult(
                 proposals=tuple(proposals),
@@ -698,7 +729,12 @@ class TeamTaskOrchestrator:
                 },
                 occurred_at=changed_at,
             )
-            result = self.handle_feedback(
+            result = self.handle_approval(
+                request_id=patch.request_id,
+                approver_id=actor_id,
+                accepted=False,
+                decided_at=changed_at,
+            ) if patch.request_id and _is_approval_rejection_update(patch.temporal_update) else self.handle_feedback(
                 request_id=patch.request_id,
                 actor_id=actor_id,
                 body=patch.body,
@@ -726,9 +762,11 @@ class TeamTaskOrchestrator:
             return "agent_requested_clarification"
         if patch.target_confidence < MIN_SEMANTIC_TARGET_CONFIDENCE:
             return "low_target_confidence"
-        semantic_shape_rejection = _semantic_update_shape_rejection(patch.temporal_update)
-        if semantic_shape_rejection:
-            return semantic_shape_rejection
+        is_request_rejection = bool(patch.request_id and _is_approval_rejection_update(patch.temporal_update))
+        if not is_request_rejection:
+            semantic_shape_rejection = _semantic_update_shape_rejection(patch.temporal_update)
+            if semantic_shape_rejection:
+                return semantic_shape_rejection
         if not patch.request_id:
             if not patch.proposal_id:
                 return "missing_proposal"
@@ -753,6 +791,9 @@ class TeamTaskOrchestrator:
             return "approver_mismatch"
         if patch.proposal_id and request.proposal_id != patch.proposal_id:
             return "proposal_request_mismatch"
+        proposal = self.store.get_proposal(request.proposal_id)
+        if proposal is not None and _looks_like_unrelated_new_work_patch(patch, proposal):
+            return "target_mismatch_new_work"
         return ""
 
     def _handle_direct_semantic_patch(
@@ -1346,7 +1387,14 @@ class TeamTaskOrchestrator:
         self.store.append_event(f"approval.{decision_value}", {"decision": decision}, occurred_at=decided_at)
 
         if not accepted:
-            updated = replace(proposal, status="rejected", updated_at=decided_at)
+            updated = replace(
+                proposal,
+                status="rejected",
+                missing_slots=(),
+                required_approvers=(),
+                approvals=(),
+                updated_at=decided_at,
+            )
             self.store.save_proposal(updated)
             self.store.append_event("proposal.rejected", {"proposal": updated}, occurred_at=decided_at)
             return OrchestrationResult(
@@ -1761,6 +1809,12 @@ def _is_confirmation_update(update: dict[str, str]) -> bool:
     return update.get("semantic_update_type") == "confirmation" or update.get("status") == "confirmed"
 
 
+def _is_approval_rejection_update(update: dict[str, str]) -> bool:
+    status = update.get("status", "").strip().lower()
+    update_type = update.get("semantic_update_type", "").strip().lower()
+    return status in {"rejected", "reject"} or update_type in {"rejection", "approval_rejection"}
+
+
 def _requires_actionable_direct_patch(update: dict[str, str]) -> bool:
     if _is_scoped_progress_completion(update):
         return False
@@ -1800,6 +1854,80 @@ def _semantic_update_shape_rejection(update: dict[str, str]) -> str:
     ):
         return "confirmation_requires_confirmed_status_or_slot"
     return ""
+
+
+def _should_reinterpret_rejected_feedback_as_new_work(result: OrchestrationResult) -> bool:
+    return any(
+        message.message_type == "agent_patch_rejected"
+        and message.card.get("reason") == "target_mismatch_new_work"
+        for message in result.outbound_messages
+    )
+
+
+def _looks_like_unrelated_new_work_patch(patch: ProposalPatch, proposal: Proposal) -> bool:
+    if patch.target_confidence >= 0.85:
+        return False
+    text = f"{patch.body} {patch.evidence_text}".strip()
+    if not text:
+        return False
+    if _has_patch_target_evidence(text, patch, proposal):
+        return False
+    update = patch.temporal_update
+    if not any(update.get(key) for key in ("due_date", "scheduled_date", "time_window", "location")):
+        return False
+    compact = text.replace(" ", "").lower()
+    new_work_tokens = (
+        "회의",
+        "미팅",
+        "면담",
+        "방문",
+        "예약",
+        "후속",
+        "연락",
+        "진행",
+        "해야",
+        "할일",
+        "할 일",
+    )
+    return any(token.replace(" ", "") in compact for token in new_work_tokens)
+
+
+def _has_patch_target_evidence(text: str, patch: ProposalPatch, proposal: Proposal) -> bool:
+    normalized = text.replace(" ", "").lower()
+    if patch.request_id and patch.request_id.lower() in normalized:
+        return True
+    if patch.proposal_id and patch.proposal_id.lower() in normalized:
+        return True
+    title = proposal.title.replace(" ", "").lower()
+    if title and title in normalized:
+        return True
+    if any(token in normalized for token in ("방금", "앞서", "아까", "해당", "그건", "그거", "그일정", "이항목", "그항목")):
+        return True
+    title_tokens = _semantic_target_tokens(proposal.title)
+    text_tokens = _semantic_target_tokens(text)
+    return len(title_tokens & text_tokens) >= 2
+
+
+def _semantic_target_tokens(text: str) -> set[str]:
+    generic = {
+        "회의",
+        "미팅",
+        "논의",
+        "일정",
+        "작업",
+        "업무",
+        "자료",
+        "준비",
+        "확인",
+        "요청",
+        "후속",
+        "진행",
+        "장소",
+        "시간",
+        "날짜",
+    }
+    tokens = {token for token in re.split(r"[^0-9A-Za-z가-힣]+", text.lower()) if len(token) >= 2}
+    return {token for token in tokens if token not in generic}
 
 
 def _semantic_direct_update_message(proposal: Proposal, *, actor_id: str) -> OutboundMessage:
