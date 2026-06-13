@@ -8,7 +8,123 @@ from typing import Literal
 ADAPTER_SCHEMA = "task-task_management.discussion-adapter.v1"
 TASK_EXPORT_SCHEMA = "task-core.export.v1"
 ASSIGNEE_VALUES = ("me", "teammate", "shared", "unassigned")
-PROPOSAL_KIND_VALUES = ("task", "event", "routine", "reference", "question", "decision")
+
+
+@dataclass(frozen=True)
+class KindSpec:
+    """Per-proposal-kind behavior, centralized so a new kind is a one-row change.
+
+    Every field reproduces today's scattered set/branch literals exactly; see the
+    migrated call sites for the source of each value. Behavior-preserving only.
+    """
+
+    name: str
+    schedulable: bool
+    requires_date: bool
+    required_event_slots: tuple[str, ...]
+    auto_approve_on_intake: bool
+    conflict_participant: bool
+    duplicate_merge_participant: bool
+    export_item_type: str
+    export_disposition: str
+    dashboard_section: str
+    reminder_message_type: str = ""
+
+
+# One row per existing kind. Field values reproduce current behavior exactly:
+#   - schedulable / dashboard_section: scheduled-commitment + dashboard kind
+#     filters (work_item_state.is_scheduled_commitment requires kind == "event";
+#     frontend/slack_page sections key off kind == question/routine/reference).
+#   - requires_date: slot_validator date-requirement exclusion set; tasks/events
+#     require a date, the rest do not (reference/routine/decision/question).
+#   - required_event_slots: slot_validator event/routine slot sets.
+#   - auto_approve_on_intake: approval_policy auto-approves only reference.
+#   - conflict_participant: conflict_policy participates only event/routine.
+#   - duplicate_merge_participant: workflow_normalizer merges only task/event.
+#   - export_item_type/export_disposition: task_core_bridge whitelist mapping.
+#   - reminder_message_type: reminders message_type per approved routine/event.
+KIND_SPECS: dict[str, "KindSpec"] = {
+    "task": KindSpec(
+        name="task",
+        schedulable=False,
+        requires_date=True,
+        required_event_slots=(),
+        auto_approve_on_intake=False,
+        conflict_participant=False,
+        duplicate_merge_participant=True,
+        export_item_type="task",
+        export_disposition="execution",
+        dashboard_section="",
+        reminder_message_type="",
+    ),
+    "event": KindSpec(
+        name="event",
+        schedulable=True,
+        requires_date=True,
+        required_event_slots=("participants", "time", "location"),
+        auto_approve_on_intake=False,
+        conflict_participant=True,
+        duplicate_merge_participant=True,
+        export_item_type="event",
+        export_disposition="execution",
+        dashboard_section="",
+        reminder_message_type="event_reminder",
+    ),
+    "routine": KindSpec(
+        name="routine",
+        schedulable=False,
+        requires_date=False,
+        required_event_slots=("recurrence", "time", "location", "participants"),
+        auto_approve_on_intake=False,
+        conflict_participant=True,
+        duplicate_merge_participant=False,
+        export_item_type="routine",
+        export_disposition="execution",
+        dashboard_section="routines",
+        reminder_message_type="routine_reminder",
+    ),
+    "reference": KindSpec(
+        name="reference",
+        schedulable=False,
+        requires_date=False,
+        required_event_slots=(),
+        auto_approve_on_intake=True,
+        conflict_participant=False,
+        duplicate_merge_participant=False,
+        export_item_type="reference",
+        export_disposition="reference",
+        dashboard_section="references",
+        reminder_message_type="",
+    ),
+    "question": KindSpec(
+        name="question",
+        schedulable=False,
+        requires_date=False,
+        required_event_slots=(),
+        auto_approve_on_intake=False,
+        conflict_participant=False,
+        duplicate_merge_participant=False,
+        export_item_type="task",
+        export_disposition="execution",
+        dashboard_section="questions",
+        reminder_message_type="",
+    ),
+    "decision": KindSpec(
+        name="decision",
+        schedulable=False,
+        requires_date=False,
+        required_event_slots=(),
+        auto_approve_on_intake=False,
+        conflict_participant=False,
+        duplicate_merge_participant=False,
+        export_item_type="task",
+        export_disposition="execution",
+        dashboard_section="",
+        reminder_message_type="",
+    ),
+}
+
+PROPOSAL_KIND_VALUES = tuple(KIND_SPECS)
 
 
 @dataclass(frozen=True)
@@ -52,6 +168,9 @@ ProposalStatus = Literal[
     "applied",
     "done",
 ]
+# Keep this Literal in sync with KIND_SPECS / PROPOSAL_KIND_VALUES (a Literal
+# cannot be built from a runtime tuple). The registry-consistency test locks the
+# two together so this annotation cannot silently drift.
 ProposalKind = Literal["task", "event", "routine", "reference", "question", "decision"]
 ApprovalDecisionValue = Literal["accepted", "rejected"]
 MessageVisibility = Literal["private", "team"]

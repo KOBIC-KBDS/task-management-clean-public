@@ -1,7 +1,7 @@
 # Data Flow: task-management-public-release
 
 - Target repo: `<repo-root>`
-- Generated at: `2026-06-09T03:14:33Z`
+- Generated at: `2026-06-13T12:02:13Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Inventory Data Flow
@@ -30,7 +30,9 @@ flowchart LR
 | docs/screenshots/slack-app-settings/05-install-2-token.png | skipped |
 | ops/com.example.task-management.slack-secretary.plist.template | skipped |
 | ops/slack-secretary-supervisor.sh | skipped |
+| task_management/__pycache__/ | skipped |
 | task_management/secretary.py | skipped |
+| tests/__pycache__/ | skipped |
 | tests/test_proactive_secretary.py | skipped |
 
 

@@ -8,7 +8,10 @@ from typing import Sequence
 from task_management.domain import ApprovalRequest, IncomingMessage, Proposal
 from task_management.operating_agent import OperatingAgentDecision, ProposalPatch
 from task_management.orchestrator import TeamTaskOrchestrator
-from task_management.semantic_context import build_operating_agent_context
+from task_management.semantic_context import (
+    build_operating_agent_context,
+    recent_conversation_from_events,
+)
 from task_management.store import TeamTaskStore
 
 
@@ -20,6 +23,7 @@ class StaticPatchAgent:
         self.patches = tuple(patches)
         self.seen_pending_requests: tuple[ApprovalRequest, ...] = ()
         self.seen_pending_proposals: tuple[Proposal, ...] = ()
+        self.seen_message: IncomingMessage | None = None
 
     def decide(
         self,
@@ -28,6 +32,7 @@ class StaticPatchAgent:
         pending_approval_requests: Sequence[ApprovalRequest],
         pending_proposals: Sequence[Proposal],
     ) -> OperatingAgentDecision:
+        self.seen_message = message
         self.seen_pending_requests = tuple(pending_approval_requests)
         self.seen_pending_proposals = tuple(pending_proposals)
         return OperatingAgentDecision(
@@ -59,6 +64,30 @@ def test_semantic_context_exposes_pending_cards_and_policy() -> None:
     assert "출장" in context["pending_proposal_cards"][0]["semantic_handles"]
 
 
+def test_semantic_context_puts_recent_conversation_outside_current_message() -> None:
+    fallback = OperatingAgentDecision(action="no_action", source="rule_based", confidence=0.2, rationale="baseline")
+    message = replace(
+        _message("승인"),
+        recent_conversation=(
+            {"role": "assistant", "text": "메일 발송은 별도 승인할까요?"},
+            {"role": "user", "text": "승인"},
+        ),
+    )
+
+    context = build_operating_agent_context(
+        message,
+        pending_approval_requests=(),
+        pending_proposals=(),
+        fallback_decision=fallback,
+    )
+
+    assert "recent_conversation" not in context["message"]
+    assert context["recent_conversation"] == [
+        {"role": "assistant", "text": "메일 발송은 별도 승인할까요?"},
+        {"role": "user", "text": "승인"},
+    ]
+
+
 def test_semantic_context_exposes_relation_metadata_keys() -> None:
     proposal, request = _pending("handoff workflow", "p2", "r2")
     proposal = replace(
@@ -88,6 +117,88 @@ def test_semantic_context_exposes_relation_metadata_keys() -> None:
     assert metadata["step_count"] == "3"
     assert metadata["workflow_id"] == "handoff"
     assert "depends_on_proposal_ids:p-blocker" in context["pending_proposal_cards"][0]["semantic_handles"]
+
+
+def test_orchestrator_feeds_recent_user_and_bot_turns_to_semantic_agent(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    proposal, request = _pending("메일 발송 승인", "proposal/send-mail", "approval/send-mail")
+    _seed(store, proposal, request)
+    store.append_event(
+        "message.received",
+        {"message": replace(_message("메일 발송 작업 잡아줘"), message_id="dm/me/previous")},
+        occurred_at=NOW,
+    )
+    store.append_event(
+        "slack.message.sent",
+        {
+            "recipient_id": "me",
+            "message": {"text": "메일 발송은 별도 승인할까요?"},
+        },
+        occurred_at=NOW,
+    )
+    agent = StaticPatchAgent(
+        (
+            ProposalPatch(
+                request_id=request.request_id,
+                proposal_id=proposal.proposal_id,
+                actor_id="me",
+                body="승인",
+                temporal_update={"status": "confirmed", "semantic_update_type": "confirmation"},
+                reason="recent_conversation_confirmation",
+                target_confidence=0.96,
+                evidence_text="승인",
+            ),
+        )
+    )
+
+    TeamTaskOrchestrator(store, operating_agent=agent).handle_message(_message("승인"))
+
+    assert agent.seen_message is not None
+    assert agent.seen_message.recent_conversation[-3:] == (
+        {"role": "user", "text": "메일 발송 작업 잡아줘"},
+        {"role": "assistant", "text": "메일 발송은 별도 승인할까요?"},
+        {"role": "user", "text": "승인"},
+    )
+
+
+def test_recent_conversation_excludes_current_message_and_reads_tail(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    previous = replace(_message("메일 발송 작업 잡아줘"), message_id="dm/me/previous")
+    store.append_event("message.received", {"message": previous}, occurred_at=NOW)
+    store.append_event(
+        "slack.message.sent",
+        {"recipient_id": "me", "message": {"text": "메일 발송은 별도 승인할까요?"}},
+        occurred_at=NOW,
+    )
+    current = replace(_message("승인"), message_id="dm/me/current")
+    # Record the current message exactly as handle_message does before assembly.
+    store.append_event("message.received", {"message": current}, occurred_at=NOW)
+
+    # Content is unchanged for a small log: the prior turns plus the current
+    # message as the trailing user turn, identical to the legacy reconstruction.
+    conversation = recent_conversation_from_events(
+        store.read_recent_events(),
+        chat_id=current.chat_id,
+        sender_id=current.sender_id,
+        current_message=current,
+    )
+    assert conversation == (
+        {"role": "user", "text": "메일 발송 작업 잡아줘"},
+        {"role": "assistant", "text": "메일 발송은 별도 승인할까요?"},
+        {"role": "user", "text": "승인"},
+    )
+
+    # The current message contextualizes itself exactly once: its own recorded
+    # message.received event is skipped during the scan, and it is appended as
+    # the single trailing user turn (no duplication).
+    assert [turn for turn in conversation if turn == {"role": "user", "text": "승인"}] == [
+        {"role": "user", "text": "승인"}
+    ]
+
+    # The tail reader returns the same recent window as the full reader for a
+    # small log while only parsing a bounded slice of the file.
+    assert store.read_recent_events() == store.read_events()
+    assert store.read_recent_events(max_events=2) == store.read_events()[-2:]
 
 
 def test_orchestrator_applies_multiple_high_confidence_semantic_patches(tmp_path: Path) -> None:

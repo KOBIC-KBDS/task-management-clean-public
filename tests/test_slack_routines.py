@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
-from task_management.domain import IncomingMessage, OutboundMessage
+from task_management.attention import collect_human_attention_items
+from task_management.domain import ApprovalRequest, IncomingMessage, OutboundMessage, Proposal
 from task_management.frontend import build_web_task_page_model
 from task_management.orchestrator import TeamTaskOrchestrator
 from task_management.reminders import build_due_reminders
@@ -188,6 +190,95 @@ def test_routine_approval_generates_linked_preparation_subtask(tmp_path: Path) -
     assert any(item["metadata"].get("parent_proposal_id") == created.proposals[0].proposal_id for item in payload["items"])
 
 
+def test_parent_rejection_cascades_to_cancel_prep_subtask(tmp_path: Path) -> None:
+    client = FakeSlackWebClient(
+        messages=[
+            _slack_message(
+                "1003.500001",
+                "single-cell DB 미팅 주 1회 화요일 10시 3층 회의실, 나랑 팀원 참석, 자료 준비 필요",
+            )
+        ],
+        channel_id="DTEST",
+    )
+    created = _run_slack(tmp_path, client).results[0]
+    request_id = created.approval_requests[0].request_id
+    store = _store(tmp_path)
+    orchestrator = TeamTaskOrchestrator(store)
+
+    # Approve the routine: the prep '자료 준비' child is auto-created and approved.
+    approved = orchestrator.handle_approval(
+        request_id=request_id,
+        approver_id="teammate",
+        accepted=True,
+        decided_at=NOW.replace(hour=10, minute=10),
+    )
+    parent = created.proposals[0]
+    prep = next(item for item in approved.proposals if item.metadata.get("link_type") == "prep_subtask")
+    assert prep.status == "approved"
+
+    # An unrelated approved task must be left untouched by the cascade.
+    unrelated = Proposal(
+        proposal_id="proposal/unrelated",
+        source_message_id="slack/DTEST/unrelated",
+        proposer_id="me",
+        title="다른 보고서 정리",
+        raw_text="다른 보고서 정리",
+        kind="task",
+        status="approved",
+        assigned_to="me",
+        task_management_area="work",
+        discussion_id="private/DTEST/unrelated",
+        message_id="slack/DTEST/unrelated",
+        required_approvers=("me",),
+        approvals=("me",),
+        due_date=date(2026, 5, 10),
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={"participants": "me"},
+    )
+    store.save_proposal(unrelated)
+
+    # Reopen the parent for a reject decision (e.g. the routine is being cancelled)
+    # and drive the real handle_approval reject branch.
+    reopened_parent = replace(parent, status="awaiting_approval", updated_at=NOW.replace(hour=11))
+    store.save_proposal(reopened_parent)
+    reject_request = ApprovalRequest(
+        request_id="approval/routine-reject",
+        proposal_id=parent.proposal_id,
+        approver_id="teammate",
+        requested_at=NOW.replace(hour=11),
+    )
+    store.save_approval_request(reject_request)
+
+    result = orchestrator.handle_approval(
+        request_id=reject_request.request_id,
+        approver_id="teammate",
+        accepted=False,
+        decided_at=NOW.replace(hour=11, minute=5),
+    )
+
+    cascaded = store.get_proposal(prep.proposal_id)
+    assert cascaded is not None
+    assert cascaded.status == "rejected"
+    assert cascaded.metadata["cascade_rejected_reason"] == "parent_rejected"
+    assert cascaded.approvals == ()
+    assert cascaded.required_approvers == ()
+    # The rejected child is returned to the caller and no longer surfaces as prep.
+    assert any(item.proposal_id == prep.proposal_id and item.status == "rejected" for item in result.proposals)
+
+    # The cascade-rejected prep no longer nags in attention.
+    attention = collect_human_attention_items(store.list_proposals(), (), today=NOW.date())
+    assert all(item.proposal.proposal_id != prep.proposal_id for item in attention)
+    # Re-approve the parent so the routine itself surfaces a due reminder, then
+    # confirm the rejected prep is not counted as outstanding prep in the briefing.
+    store.save_proposal(replace(parent, status="approved", updated_at=NOW.replace(hour=12)))
+    reminders = build_due_reminders(store, now=NOW.replace(hour=8), actor_id="me")
+    assert all(prep.title not in reminder.text for reminder in reminders)
+
+    # The unrelated approved task is untouched.
+    assert store.get_proposal(unrelated.proposal_id).status == "approved"  # type: ignore[union-attr]
+
+
 def test_day_of_routine_reminder_dm_is_idempotent_and_mentions_outstanding_prep(tmp_path: Path) -> None:
     client = FakeSlackWebClient(
         messages=[
@@ -241,6 +332,77 @@ def test_pending_missing_info_reminder_is_human_friendly_and_periodic(tmp_path: 
     assert len(next_bucket) == 1
 
 
+def _save_pending_missing_info(
+    store: TeamTaskStore,
+    *,
+    proposal_id: str,
+    request_id: str,
+    deferred_until: str,
+    cadence_hours: str | None = None,
+) -> None:
+    metadata = {"participants": "me", "deferred_until": deferred_until, "deferred_missing_slots": "time"}
+    if cadence_hours is not None:
+        metadata["deferred_reminder_cadence_hours"] = cadence_hours
+    store.save_proposal(
+        Proposal(
+            proposal_id=proposal_id,
+            source_message_id=f"slack/DTEST/{proposal_id}",
+            proposer_id="me",
+            title="수요일 점심회식",
+            raw_text="수요일 점심회식",
+            kind="event",
+            status="awaiting_approval",
+            assigned_to="me",
+            task_management_area="work",
+            discussion_id=f"private/DTEST/{proposal_id}",
+            message_id=f"slack/DTEST/{proposal_id}/1",
+            required_approvers=("me",),
+            missing_slots=("time",),
+            scheduled_date=date(2026, 5, 20),
+            time_window="lunch",
+            created_at=datetime(2026, 5, 18, 10),
+            updated_at=datetime(2026, 5, 18, 10),
+            metadata=metadata,
+        )
+    )
+    store.save_approval_request(
+        ApprovalRequest(
+            request_id=request_id,
+            proposal_id=proposal_id,
+            approver_id="me",
+            requested_at=datetime(2026, 5, 18, 10),
+        )
+    )
+
+
+def test_deferred_missing_info_reminder_is_reachable_on_its_cadence(tmp_path: Path) -> None:
+    # Regression for BUG A9 part 2: the periodic reminders tick must actually
+    # reach _build_pending_info_reminders / the deferred_reminder path. The slot
+    # stays quiet until deferred_until, then fires, and re-fires on the next
+    # deferred_reminder_cadence_hours bucket (proving the cadence is live, not a
+    # one-shot). A 2h cadence => bucket = hour // 2.
+    store = _store(tmp_path)
+    _save_pending_missing_info(
+        store,
+        proposal_id="proposal/cadence-lunch",
+        request_id="approval/cadence-lunch",
+        deferred_until="2026-05-20T07:30:00",
+        cadence_hours="2",
+    )
+
+    before_due = build_due_reminders(store, now=datetime(2026, 5, 20, 7, 0), actor_id="me")
+    first_due = build_due_reminders(store, now=datetime(2026, 5, 20, 8, 0), actor_id="me")
+    same_bucket = build_due_reminders(store, now=datetime(2026, 5, 20, 9, 30), actor_id="me")
+    next_cadence_bucket = build_due_reminders(store, now=datetime(2026, 5, 20, 10, 0), actor_id="me")
+
+    assert before_due == ()
+    assert len(first_due) == 1
+    assert first_due[0].message_type == "missing_info_reminder"
+    assert "수요일 점심회식" in first_due[0].text
+    assert same_bucket == ()
+    assert len(next_cadence_bucket) == 1
+
+
 def test_not_decided_feedback_defers_missing_slot_reminders_until_event_day(tmp_path: Path) -> None:
     client = FakeSlackWebClient(
         messages=[_slack_message("1004.600001", "수요일 점심회식 참석자 나", at=datetime(2026, 5, 18, 10))],
@@ -266,7 +428,7 @@ def test_not_decided_feedback_defers_missing_slot_reminders_until_event_day(tmp_
     assert deferred.missing_slots == ("time",)
     assert deferred.metadata["location_optional"] == "true"
     assert deferred.metadata["deferred_missing_slots"] == "time"
-    assert deferred.metadata["deferred_until"] == "2026-05-20T08:30:00"
+    assert deferred.metadata["deferred_until"] == "2026-05-20T07:30:00"
 
     before_due = build_due_reminders(store, now=datetime(2026, 5, 19, 8, 30), actor_id="me")
     first_due = build_due_reminders(store, now=datetime(2026, 5, 20, 8, 30), actor_id="me")

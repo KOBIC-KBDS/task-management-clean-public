@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from dataclasses import replace
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Sequence
 
 import pytest
 
+from task_management.approval_policy import approval_request
 from task_management.cli import main
+from task_management.conflict_policy import apply_conflict_resolution_feedback
+from task_management.deferred_policy import default_deferred_until
 from task_management.domain import ApprovalRequest, IncomingMessage, OutboundMessage, Proposal
 from task_management.operating_agent import OperatingAgentDecision, ProposalPatch
 from task_management.orchestrator import TeamTaskOrchestrator
@@ -451,6 +455,127 @@ def test_future_deferred_pending_missing_info_is_quiet_until_due(tmp_path: Path)
     assert "다시 확인할 항목입니다" not in briefing.text
     assert briefing.card["attention_count"] == "0"
     assert briefing.card["deferred_due_count"] == "0"
+
+
+def test_malformed_deferred_until_is_quiet_not_fired_immediately(tmp_path: Path) -> None:
+    # Regression for BUG #20: a non-ISO deferred_until ('next week', a value with
+    # a trailing 'KST') previously parsed-failed and was treated as 'due now', so
+    # a malformed deferral fired an immediate reminder. The conservative fix keeps
+    # it quiet until the value is corrected to a parseable timestamp.
+    store = _store(tmp_path)
+    _save_pending(
+        store,
+        _proposal(
+            "proposal/malformed-lunch",
+            "월요일 점심회식",
+            kind="event",
+            status="awaiting_approval",
+            scheduled_date=NOW.date(),
+            time_window="lunch",
+            missing_slots=("time",),
+            metadata={
+                "participants": "me",
+                "deferred_until": "2026-06-13 09:00 KST",
+                "deferred_missing_slots": "time",
+            },
+        ),
+        "approval/malformed-lunch",
+    )
+
+    briefing = build_morning_briefing(store, now=NOW, actor_id="me", reserve=False)[0]
+
+    assert "월요일 점심회식" not in briefing.text
+    assert "다시 확인할 항목입니다" not in briefing.text
+    assert briefing.card["attention_count"] == "0"
+    assert briefing.card["deferred_due_count"] == "0"
+
+
+def test_same_day_default_deferral_surfaces_in_morning_briefing(tmp_path: Path) -> None:
+    # Regression for BUG A9: a deferral made on a prior day targeting today must
+    # surface in today's ~08:00 briefing. The default policy previously parked
+    # the re-prompt at 08:30, after the once-a-day briefing window had already
+    # fired and locked out the day via its dedupe key, so the user was never
+    # re-prompted. The policy must land it at/before the briefing window.
+    deferred_until = default_deferred_until(NOW.date(), changed_at=NOW.replace(day=18, hour=10))
+    store = _store(tmp_path)
+    _save_pending(
+        store,
+        _proposal(
+            "proposal/today-lunch",
+            "수요일 점심회식",
+            kind="event",
+            status="awaiting_approval",
+            scheduled_date=NOW.date(),
+            time_window="lunch",
+            missing_slots=("time",),
+            metadata={
+                "participants": "me",
+                "deferred_until": deferred_until,
+                "deferred_missing_slots": "time",
+            },
+        ),
+        "approval/today-lunch",
+    )
+
+    briefing = build_morning_briefing(store, now=NOW, actor_id="me", reserve=False)[0]
+
+    assert "다시 확인할 항목입니다" in briefing.text
+    assert "수요일 점심회식" in briefing.text
+    assert briefing.card["attention_count"] == "1"
+    assert briefing.card["deferred_due_count"] == "1"
+
+
+def test_future_day_default_deferral_is_quiet_at_today_briefing(tmp_path: Path) -> None:
+    # The complement of the regression above: a deferral targeting a FUTURE day
+    # must stay silent at today's 08:00 briefing (no premature fire), even though
+    # the re-prompt now lands earlier in the day.
+    deferred_until = default_deferred_until(NOW.date() + timedelta(days=1), changed_at=NOW)
+    store = _store(tmp_path)
+    _save_pending(
+        store,
+        _proposal(
+            "proposal/future-default-lunch",
+            "목요일 점심회식",
+            kind="event",
+            status="awaiting_approval",
+            scheduled_date=NOW.date() + timedelta(days=1),
+            time_window="lunch",
+            missing_slots=("time",),
+            metadata={
+                "participants": "me",
+                "deferred_until": deferred_until,
+                "deferred_missing_slots": "time",
+            },
+        ),
+        "approval/future-default-lunch",
+    )
+
+    briefing = build_morning_briefing(store, now=NOW, actor_id="me", reserve=False)[0]
+
+    assert "목요일 점심회식" not in briefing.text
+    assert "다시 확인할 항목입니다" not in briefing.text
+    assert briefing.card["attention_count"] == "0"
+    assert briefing.card["deferred_due_count"] == "0"
+
+
+def test_supervisor_wires_periodic_reminders_tick() -> None:
+    # Regression for BUG A9 part 2: the live supervisor previously scheduled
+    # only the once-a-day briefings, so the reminders/deferred_reminder cadence
+    # never ran in deployment. The supervisor must invoke the reminders CLI on a
+    # within-day interval (not gated to once per calendar day like the briefings)
+    # so deferrals surface the moment they become due.
+    script = Path(__file__).resolve().parents[1] / "ops" / "slack-secretary-supervisor.sh"
+    body = script.read_text(encoding="utf-8")
+
+    # The reminders subcommand is actually invoked.
+    assert "task_management.cli --state \"$STATE\" reminders --now" in body
+    # It is fired on an interval, not locked to once per day like the briefings.
+    assert "REMINDERS_INTERVAL_MINUTES" in body
+    # The reminders marker is keyed on a within-day slot, not just "$today".
+    assert "reminders_slot" in body
+    # reminders must NOT inject --actor (that subcommand rejects it).
+    reminders_line = next(line for line in body.splitlines() if "reminders --now" in line)
+    assert "--actor" not in reminders_line
 
 
 def test_due_deferred_missing_info_is_not_duplicated_as_progress_attention(tmp_path: Path) -> None:
@@ -1335,3 +1460,196 @@ def test_secretary_cli_dry_run_does_not_consume_then_send_dedupes(tmp_path: Path
     duplicate = build_morning_briefing(_store(state_dir), now=NOW.replace(minute=2), actor_id="me", reserve=True)
     assert len(real) == 1
     assert duplicate == ()
+
+
+# --- Approval-state-machine regressions (A5/A6/A7/A8) -----------------------
+
+
+def test_change_with_remaining_missing_slot_keeps_request_pending(tmp_path: Path) -> None:
+    # Bug A5: 변경 that fills only the date on a proposal still missing
+    # participants must NOT auto-accept/approve; it must keep the request pending
+    # and re-question the missing slot.
+    store = _store(tmp_path)
+    proposal = _proposal(
+        "proposal/kickoff",
+        "킥오프 회의 잡기",
+        kind="event",
+        status="awaiting_approval",
+        missing_slots=("date", "participants"),
+        metadata={
+            "needs_exact_time": "false",
+            "location_optional": "true",
+        },
+    )
+    # No participant metadata yet, so the participants slot is genuinely open.
+    proposal = replace(proposal, metadata={k: v for k, v in proposal.metadata.items() if k != "participants"})
+    _save_pending(store, proposal, "approval/kickoff")
+
+    result = TeamTaskOrchestrator(store).handle_change(
+        target_id="approval/kickoff",
+        actor_id="me",
+        body="다음 주 금요일로 잡자",
+        changed_at=NOW.replace(hour=11),
+    )
+
+    updated = store.get_proposal("proposal/kickoff")
+    assert updated is not None
+    assert updated.status == "awaiting_approval"
+    assert "participants" in updated.missing_slots
+    request = store.get_approval_request("approval/kickoff")
+    assert request is not None and request.status == "pending"
+    assert result.outbound_messages[0].message_type == "missing_info_followup"
+    assert "proposal.approved" not in [event["type"] for event in store.read_events()]
+
+
+def test_change_on_conflict_hold_preserves_conflict_slot(tmp_path: Path) -> None:
+    # Bug A6: a proposal held for a scheduling conflict must keep the
+    # conflict_resolution slot when a later 변경 only adjusts the date, and must
+    # not reach approved until a conflict decision is recorded.
+    store = _store(tmp_path)
+    existing = _proposal(
+        "proposal/existing-meeting",
+        "기존 팀 회의",
+        kind="event",
+        status="approved",
+        scheduled_date=date(2026, 5, 22),
+    )
+    store.save_proposal(existing)
+    held = _proposal(
+        "proposal/trip",
+        "출장 일정",
+        kind="question",
+        status="awaiting_approval",
+        scheduled_date=date(2026, 5, 22),
+        missing_slots=("conflict_resolution",),
+        metadata={
+            "conflict_detected": "true",
+            "conflict_with_proposal_ids": "proposal/existing-meeting",
+        },
+    )
+    _save_pending(store, held, "approval/trip")
+
+    result = TeamTaskOrchestrator(store).handle_change(
+        target_id="approval/trip",
+        actor_id="me",
+        body="다음 주 금요일로 미루자",
+        changed_at=NOW.replace(hour=11),
+    )
+
+    updated = store.get_proposal("proposal/trip")
+    assert updated is not None
+    assert updated.status == "awaiting_approval"
+    assert "conflict_resolution" in updated.missing_slots
+    assert "conflict_resolution_action" not in updated.metadata
+    assert result.outbound_messages[0].message_type == "missing_info_followup"
+    assert "proposal.approved" not in [event["type"] for event in store.read_events()]
+
+    # Once a conflict decision is recorded, the slot clears normally.
+    resolved = apply_conflict_resolution_feedback(
+        store,
+        _message("기존 회의 취소", at=NOW.replace(hour=12)),
+        now=NOW.replace(hour=12),
+    )
+    assert resolved is not None
+    assert "conflict_resolution" not in resolved.missing_slots
+    assert resolved.metadata.get("conflict_resolution_action") == "cancel_existing"
+
+
+def test_rejected_missing_slot_request_is_not_resurrected(tmp_path: Path) -> None:
+    # Bug A7: the deterministic request_id plus an unguarded upsert used to flip a
+    # terminal (rejected) request back to pending when the proposal re-entered a
+    # needs-info state. The terminal decision must be preserved.
+    store = _store(tmp_path)
+    proposal = _proposal(
+        "proposal/needs-info",
+        "정보 필요 항목",
+        kind="event",
+        status="awaiting_approval",
+        scheduled_date=NOW.date(),
+        missing_slots=("participants",),
+        metadata={"location_optional": "true", "needs_exact_time": "false"},
+    )
+    proposal = replace(proposal, metadata={k: v for k, v in proposal.metadata.items() if k != "participants"})
+    store.save_proposal(proposal)
+
+    request = approval_request(proposal.proposal_id, "me", now=NOW)
+    store.save_approval_request(request)
+    # The approver rejects the missing-slot request -> terminal state.
+    rejected = TeamTaskOrchestrator(store).handle_approval(
+        request_id=request.request_id,
+        approver_id="me",
+        accepted=False,
+        decided_at=NOW.replace(hour=9),
+    )
+    assert rejected.proposals[0].status == "rejected"
+    assert store.get_approval_request(request.request_id).status == "rejected"  # type: ignore[union-attr]
+
+    # Drive the proposal back into a pending-needs-info state and rebuild the
+    # missing-slot request: the same deterministic id must NOT revert to pending.
+    revived = replace(
+        proposal,
+        status="awaiting_approval",
+        missing_slots=("participants",),
+        updated_at=NOW.replace(hour=10),
+    )
+    store.save_proposal(revived)
+    rebuilt, created = TeamTaskOrchestrator(store)._ensure_missing_slot_request(
+        revived, actor_id="me", now=NOW.replace(hour=10)
+    )
+
+    assert created is False
+    assert rebuilt.status == "rejected"
+    assert store.get_approval_request(request.request_id).status == "rejected"  # type: ignore[union-attr]
+
+    # A direct re-save of the terminal id at pending status is also rejected by
+    # the store-level guard.
+    store.save_approval_request(replace(request, status="pending", decided_at=None))
+    assert store.get_approval_request(request.request_id).status == "rejected"  # type: ignore[union-attr]
+
+
+def test_direct_semantic_deferral_keeps_approved_proposal(tmp_path: Path) -> None:
+    # Bug A8: deferring a slot on an already-approved proposal via a direct
+    # semantic patch must keep the approval (invariant 4 IFF) and acknowledge the
+    # deferral instead of re-asking the deferred slot.
+    store = _store(tmp_path)
+    store.save_proposal(
+        _proposal(
+            "proposal/event",
+            "팀 워크숍",
+            kind="event",
+            status="approved",
+            scheduled_date=date(2026, 5, 22),
+            time_window="14:00",
+            metadata={"location_optional": "true"},
+        )
+    )
+    patch = ProposalPatch(
+        request_id="",
+        proposal_id="proposal/event",
+        actor_id="me",
+        body="다음 주 금요일로 미루고 시간은 아직 미정",
+        temporal_update={
+            "scheduled_date": "2026-05-29",
+            "time_window": "미정",
+            "defer_missing_slots": "time",
+            "needs_exact_time": "true",
+            "semantic_update_type": "deferral",
+        },
+        reason="defer_time",
+        target_confidence=0.95,
+        evidence_text="다음 주 금요일로 미루고 시간은 아직 미정",
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=DirectPatchAgent(patch)).handle_message(
+        _message("워크숍 다음 주 금요일로 미루고 시간은 아직 미정", ts="1009.000001", at=NOW.replace(hour=9))
+    )
+
+    updated = store.get_proposal("proposal/event")
+    assert updated is not None
+    assert updated.status == "approved"
+    assert updated.approvals == ("me",)
+    assert updated.scheduled_date == date(2026, 5, 29)
+    message_types = {message.message_type for message in result.outbound_messages}
+    assert "missing_info_deferred" in message_types
+    assert "approval_request" not in message_types
+    assert "missing_info_followup" not in message_types

@@ -6,6 +6,7 @@ from typing import Iterable
 
 from .approval_policy import approval_request, missing_slot_question_message
 from .domain import ApprovalRequest, OutboundMessage, Proposal
+from .outbound_delivery import approval_request_delivery_key
 from .store import TeamTaskStore
 
 
@@ -139,9 +140,16 @@ def _current_initial_prompt_was_delivered(
         return False
     if proposal.updated_at > request.requested_at:
         return False
-    return store.has_outbound_delivery(
-        f"slack-outbound/{request.approver_id}/approval_request/{request.request_id}"
-    )
+    base_key = approval_request_delivery_key(request.approver_id, request.request_id)
+    if store.has_outbound_delivery(base_key):
+        return True
+    # Inbound-triggered approval prompts salt the fallback dedupe key with the
+    # triggering message id (see outbound_delivery.outbound_dedupe_key); the
+    # proposal records that same id, so reconstruct the salted key to detect
+    # delivery.
+    if proposal.source_message_id:
+        return store.has_outbound_delivery(f"{base_key}/{proposal.source_message_id}")
+    return False
 
 
 def _followup_dedupe_key(proposal: Proposal, request: ApprovalRequest, *, now: datetime | None = None) -> str:

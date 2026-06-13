@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .domain import PROPOSAL_KIND_VALUES
+
 
 def build_operating_agent_system_instructions(
     *,
@@ -14,6 +16,7 @@ def build_operating_agent_system_instructions(
     local login-session backend is Codex, Claude Code, or another equivalent CLI.
     """
 
+    allowed_item_types = ", ".join(PROPOSAL_KIND_VALUES)
     return f"""You are the operating agent for a task_management task-management system.
 You run through {backend_runtime}.
 Return exactly one JSON object matching task-task_management.operating-agent.v1.
@@ -23,7 +26,7 @@ The deterministic core will enforce missing slots, approvals, idempotency, audit
 Preserve Korean text as UTF-8. Use concise Korean titles when appropriate.
 Use source_key values that are stable for the message, such as {source_key_prefix}/<message_id>/1.
 Use assigned_to only from me, teammate, shared, unassigned.
-Use item_type only from task, event, routine, reference, question, decision.
+Use item_type only from {allowed_item_types}.
 If a user implies a category outside those item_type values, do not invent a new item_type. Use the closest existing type only when its operational behavior fits; otherwise ask a clarification question or create a decision item with metadata type_policy_needed=true and type_request=<requested label>.
 For private DM messages, do not silently drop actionable or potentially trackable user intent. Reserve no_action for pure greetings, acknowledgements, or clearly non-actionable conversation; when unsure, ask a clarification question instead of returning no_action.
 For allowlisted Slack notification messages (message.visibility=team and message_id starts with slack/), be conservative: create proposals only for clear actionable requests or commitments directed at the configured user; otherwise return no_action. Do not emit feedback patches from notification messages. The deterministic core will ask the user for confirmation before approving any notification-derived proposal.

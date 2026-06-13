@@ -1,7 +1,7 @@
 # Architecture Inventory: task-management-public-release
 
 - Target repo: `<repo-root>`
-- Generated at: `2026-06-09T03:14:33Z`
+- Generated at: `2026-06-13T12:02:13Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Overview Diagram
@@ -9,11 +9,11 @@
 ```mermaid
 flowchart TD
   repo["task-management-public-release"]
-  module_task_management["task_management (50 files)"]
+  module_task_management["task_management (65 files)"]
   repo --> module_task_management
-  module_tests["tests (27 files)"]
+  module_tests["tests (28 files)"]
   repo --> module_tests
-  module_docs["docs (14 files)"]
+  module_docs["docs (15 files)"]
   repo --> module_docs
   module_ops["ops (12 files)"]
   repo --> module_ops
@@ -35,19 +35,19 @@ flowchart TD
 
 | Item | Value |
 | --- | --- |
-| Files scanned | 121 |
-| Skipped paths | 13 |
+| Files scanned | 138 |
+| Skipped paths | 15 |
 | Entrypoints detected | 1 |
-| Cheap dependency edges | 522 |
+| Cheap dependency edges | 661 |
 
 
 ## Top-level Modules
 
 | Item | Value |
 | --- | --- |
-| task_management | 50 files |
-| tests | 27 files |
-| docs | 14 files |
+| task_management | 65 files |
+| tests | 28 files |
+| docs | 15 files |
 | ops | 12 files |
 | example_task_management.egg-info | 6 files |
 | examples | 5 files |
@@ -65,8 +65,8 @@ flowchart TD
 | --- | --- |
 | HTML | 4 |
 | JSON | 4 |
-| Markdown | 17 |
-| Python | 77 |
+| Markdown | 18 |
+| Python | 93 |
 | Shell | 1 |
 | TOML | 1 |
 

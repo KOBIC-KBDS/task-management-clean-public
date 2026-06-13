@@ -647,19 +647,21 @@ def test_chat_adapter_dispatch_keeps_future_kakao_wrapper_thin(tmp_path: Path) -
     dispatch_outbound(adapter, result.outbound_messages)
 
     assert adapter.personal == [("teammate", result.outbound_messages[0].text)]
-    assert adapter.team == []
 
 
+# Realigned for Phase D channel-extensibility: ChatAdapter was a dead
+# forward-looking protocol whose send_personal -> None / send_team shape the real
+# SlackDmAdapter never satisfied.  It is now an alias of the single surviving
+# outbound transport protocol, LiveChatTransport (poll_messages + send_personal
+# -> str), so RecordingAdapter matches that shape: send_personal returns a
+# provider message id and there is no send_team.
 class RecordingAdapter:
     def __init__(self) -> None:
         self.personal: list[tuple[str, str]] = []
-        self.team: list[str] = []
 
-    def poll_messages(self):
+    def poll_messages(self) -> tuple:
         return ()
 
-    def send_personal(self, actor_id: str, text: str) -> None:
+    def send_personal(self, actor_id: str, text: str) -> str:
         self.personal.append((actor_id, text))
-
-    def send_team(self, text: str) -> None:
-        self.team.append(text)
+        return f"recorded/{len(self.personal)}"

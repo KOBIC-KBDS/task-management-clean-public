@@ -2,12 +2,10 @@
 
 - Target repo: `<repo-root>`
 - Output directory: `docs/codeboarding`
-- Generated at: `2026-06-09T03:14:33Z`
+- Generated at: `2026-06-13T12:02:13Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Start Here
-
-For how the semantic agent and deterministic runtime actually operate, read [`../agent-flow.md`](../agent-flow.md) first. CodeBoarding output is static inventory evidence, not the product flow narrative.
 
 1. Read `architecture.md` for the high-level inventory and overview diagram.
 2. Read `module-map.md` for package/module evidence and cheap import edges.

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from typing import Any, Callable
 
 from .attention import (
     HumanAttentionItem,
@@ -9,7 +10,13 @@ from .attention import (
     deferred_missing_slots,
     has_deferred_missing_info,
 )
-from .domain import OutboundMessage, Proposal
+from .domain import KIND_SPECS, OutboundMessage, Proposal
+from .outbound_delivery import reserve_outbound
+from .hierarchy_view import (
+    display_children,
+    is_workflow_context_parent,
+    section_anchor,
+)
 from .human_view import (
     actor_label,
     build_missing_slot_question,
@@ -22,23 +29,110 @@ from .human_view import (
     short_id,
 )
 from .relations import (
-    WORKFLOW_PARENT_ROLE,
-    WORKFLOW_ROLE_KEY,
+    COMPLETED_AT_KEY,
+    LOCATION_KEY,
     blocking_dependencies,
     child_proposals,
     is_relation_complete,
-    parent_proposal_id,
     step_label,
 )
-from .sort_keys import proposal_deadline_sort_key
+from .sort_keys import proposal_deadline_sort_key, schedule_first_sort_key
 from .store import TeamTaskStore
 from .work_item_state import (
     is_past_scheduled_commitment,
+    is_personal_scope,
     needs_time_resolution,
     requires_progress_confirmation,
+    schedule_first_date,
     work_item_due_detail_label,
     work_item_urgency_label,
 )
+
+
+@dataclass(frozen=True)
+class _ProactiveBody:
+    """One surface instance ready for the shared reserve/emit lifecycle.
+
+    ``build`` callables return zero or more of these.  A single briefing yields
+    one body; ``proactive_checks`` yields one per due proposal.  Each body owns
+    everything that differs per emission: the rendered text, card payload, the
+    optional ``proposal_id`` carried on the outbound message, the per-emission
+    ``dedupe_key``, and the ``event_payload`` recorded on reserve.
+    """
+
+    text: str
+    card: dict[str, str]
+    dedupe_key: str
+    event_payload: dict[str, Any]
+    proposal_id: str = ""
+
+
+@dataclass(frozen=True)
+class ProactiveSurface:
+    """One proactive-secretary surface in declarative form.
+
+    The four historical builders repeated the same preflight ->
+    ``reserve_outbound`` -> ``_truncate`` lifecycle, differing only in the
+    per-surface dedupe key, ``provider_message_id`` suffix, ``event_type``, and
+    Korean body.  A surface captures those differences so adding a new proactive
+    surface is one ``ProactiveSurface`` entry plus its ``build`` function.
+
+    INVARIANT 7 (outbound dedup) depends on ``dedupe_key`` producing
+    byte-identical strings and ``emit_proactive`` recording the same delivery and
+    event as the inlined copies it replaces, so no key/suffix/event may change.
+    """
+
+    name: str
+    message_type: str
+    event_type: str
+    provider_message_id: str
+    dedupe_key: Callable[..., str]
+    build: Callable[..., tuple[_ProactiveBody, ...]]
+    truncate: bool = True
+
+
+def emit_proactive(
+    store: TeamTaskStore,
+    surface: ProactiveSurface,
+    bodies: tuple[_ProactiveBody, ...],
+    *,
+    now: datetime,
+    actor_id: str,
+    reserve: bool,
+    max_chars: int = 3900,
+) -> tuple[OutboundMessage, ...]:
+    """Shared reserve/emit flow for every proactive surface.
+
+    Renders each body's text (truncating when the surface opts in), builds the
+    ``OutboundMessage`` with the surface's ``message_type``, and reserves the
+    single outbound delivery via ``reserve_outbound`` using the surface's
+    ``provider_message_id`` suffix and ``event_type``.  Bodies whose dedupe key is
+    already reserved are skipped, mirroring the historical per-builder behavior.
+    """
+
+    messages: list[OutboundMessage] = []
+    for body in bodies:
+        text = _truncate(body.text, max_chars=max_chars) if surface.truncate else body.text
+        message = OutboundMessage(
+            surface="personal_chat",
+            recipient_id=actor_id,
+            message_type=surface.message_type,
+            text=text,
+            proposal_id=body.proposal_id,
+            card=body.card,
+        )
+        if reserve and not reserve_outbound(
+            store,
+            message,
+            dedupe_key=body.dedupe_key,
+            provider_message_id=surface.provider_message_id,
+            event_type=surface.event_type,
+            event_payload=body.event_payload,
+            now=now,
+        ):
+            continue
+        messages.append(message)
+    return tuple(messages)
 
 
 def build_morning_briefing(
@@ -139,12 +233,8 @@ def build_morning_briefing(
             "예: `출장 준비물 다 쌌어`, `ProjectA 정리는 금요일 오후로 미뤄줘`, `장소는 3층 회의실`",
         ]
     )
-    text = _truncate("\n".join(lines).strip(), max_chars=max_chars)
-    message = OutboundMessage(
-        surface="personal_chat",
-        recipient_id=actor_id,
-        message_type="morning_briefing",
-        text=text,
+    body = _ProactiveBody(
+        text="\n".join(lines).strip(),
         card={
             "dedupe_key": dedupe_key,
             "date": today.isoformat(),
@@ -154,25 +244,18 @@ def build_morning_briefing(
             "attention_count": str(len(attention_items)),
             "deferred_due_count": str(len(deferred_due)),
         },
+        dedupe_key=dedupe_key,
+        event_payload={"dedupe_key": dedupe_key, "actor_id": actor_id, "date": today.isoformat()},
     )
-    if reserve:
-        recorded = store.record_outbound_delivery(
-            dedupe_key=dedupe_key,
-            surface=message.surface,
-            recipient_id=message.recipient_id,
-            provider="slack",
-            provider_message_id="morning-briefing-preview",
-            sent_at=now,
-            payload={"text": message.text, "card": message.card},
-        )
-        if not recorded:
-            return ()
-        store.append_event(
-            "briefing.morning.created",
-            {"dedupe_key": dedupe_key, "actor_id": actor_id, "date": today.isoformat()},
-            occurred_at=now,
-        )
-    return (message,)
+    return emit_proactive(
+        store,
+        MORNING_BRIEFING_SURFACE,
+        (body,),
+        now=now,
+        actor_id=actor_id,
+        reserve=reserve,
+        max_chars=max_chars,
+    )
 
 
 def build_afternoon_briefing(
@@ -244,12 +327,8 @@ def build_afternoon_briefing(
             "예: `오전 항목 완료`, `오후 미팅 준비는 반쯤 했어`, `내일 오전으로 미뤄줘`",
         ]
     )
-    text = _truncate("\n".join(lines).strip(), max_chars=max_chars)
-    message = OutboundMessage(
-        surface="personal_chat",
-        recipient_id=actor_id,
-        message_type="afternoon_briefing",
-        text=text,
+    body = _ProactiveBody(
+        text="\n".join(lines).strip(),
         card={
             "dedupe_key": dedupe_key,
             "date": today.isoformat(),
@@ -257,25 +336,18 @@ def build_afternoon_briefing(
             "week_open_count": str(len(week_open)),
             "attention_count": str(len(attention_items)),
         },
+        dedupe_key=dedupe_key,
+        event_payload={"dedupe_key": dedupe_key, "actor_id": actor_id, "date": today.isoformat()},
     )
-    if reserve:
-        recorded = store.record_outbound_delivery(
-            dedupe_key=dedupe_key,
-            surface=message.surface,
-            recipient_id=message.recipient_id,
-            provider="slack",
-            provider_message_id="afternoon-briefing-preview",
-            sent_at=now,
-            payload={"text": message.text, "card": message.card},
-        )
-        if not recorded:
-            return ()
-        store.append_event(
-            "briefing.afternoon.created",
-            {"dedupe_key": dedupe_key, "actor_id": actor_id, "date": today.isoformat()},
-            occurred_at=now,
-        )
-    return (message,)
+    return emit_proactive(
+        store,
+        AFTERNOON_BRIEFING_SURFACE,
+        (body,),
+        now=now,
+        actor_id=actor_id,
+        reserve=reserve,
+        max_chars=max_chars,
+    )
 
 
 def build_proactive_checks(
@@ -288,7 +360,7 @@ def build_proactive_checks(
     """Ask whether due unfinished work has been done, with per-day dedupe."""
 
     today = now.date()
-    checks: list[OutboundMessage] = []
+    bodies: list[_ProactiveBody] = []
     all_proposals = list(store.list_proposals())
     proposals_by_id = {proposal.proposal_id: proposal for proposal in all_proposals}
     for proposal in all_proposals:
@@ -329,45 +401,35 @@ def build_proactive_checks(
                 f"{request_sentence} 완료했다면 예: "
                 f"`{proposal.title} 완료`"
             )
-        message = OutboundMessage(
-            surface="personal_chat",
-            recipient_id=actor_id,
-            message_type="due_work_check",
-            text=text,
-            proposal_id=proposal.proposal_id,
-            card={
-                "dedupe_key": dedupe_key,
-                "proposal_id": proposal.proposal_id,
-                "title": proposal.title,
-                "due_date": proposal.due_date.isoformat() if proposal.due_date else "",
-                "scheduled_date": proposal.scheduled_date.isoformat() if proposal.scheduled_date else "",
-                "overdue": str(overdue).lower(),
-            },
-        )
-        if reserve:
-            recorded = store.record_outbound_delivery(
+        bodies.append(
+            _ProactiveBody(
+                text=text,
+                card={
+                    "dedupe_key": dedupe_key,
+                    "proposal_id": proposal.proposal_id,
+                    "title": proposal.title,
+                    "due_date": proposal.due_date.isoformat() if proposal.due_date else "",
+                    "scheduled_date": proposal.scheduled_date.isoformat() if proposal.scheduled_date else "",
+                    "overdue": str(overdue).lower(),
+                },
                 dedupe_key=dedupe_key,
-                surface=message.surface,
-                recipient_id=message.recipient_id,
-                provider="slack",
-                provider_message_id="proactive-check-preview",
-                sent_at=now,
-                payload={"text": message.text, "card": message.card},
-            )
-            if not recorded:
-                continue
-            store.append_event(
-                "proactive_check.created",
-                {
+                event_payload={
                     "dedupe_key": dedupe_key,
                     "proposal_id": proposal.proposal_id,
                     "actor_id": actor_id,
                     "date": today.isoformat(),
                 },
-                occurred_at=now,
+                proposal_id=proposal.proposal_id,
             )
-        checks.append(message)
-    return tuple(checks)
+        )
+    return emit_proactive(
+        store,
+        PROACTIVE_CHECK_SURFACE,
+        tuple(bodies),
+        now=now,
+        actor_id=actor_id,
+        reserve=reserve,
+    )
 
 
 def build_end_of_day_review(
@@ -406,7 +468,7 @@ def build_end_of_day_review(
         for proposal in proposals
         if proposal.status in {"approved", "applied"}
         and proposal.status != "done"
-        and proposal.kind == "event"
+        and KIND_SPECS[proposal.kind].schedulable
         and proposal.scheduled_date == today
     ]
     pending_due = [
@@ -444,7 +506,7 @@ def build_end_of_day_review(
         lines.extend(["*남은 항목*"])
         for proposal in review_items:
             due_label = date_label(_proposal_date(proposal)) if _proposal_date(proposal) else "날짜 미정"
-            detail = " · ".join(item for item in (due_label, proposal.time_window, proposal.metadata.get("location", "")) if item)
+            detail = " · ".join(item for item in (due_label, proposal.time_window, proposal.metadata.get(LOCATION_KEY, "")) if item)
             overdue_detail = " · 🔴 마감 지남" if _is_overdue(proposal, today=today) else ""
             lines.append(f"- *{proposal.title}*" + (f" ({detail}{overdue_detail})" if detail else ""))
     if pending_items:
@@ -466,12 +528,8 @@ def build_end_of_day_review(
             "미완료라면 새 마감/다음 확인 시점을 알려주세요. 그러면 기존 task를 닫지 않고 마감 또는 진행상황을 갱신합니다.",
         ]
     )
-    text = _truncate("\n".join(lines).strip(), max_chars=max_chars)
-    message = OutboundMessage(
-        surface="personal_chat",
-        recipient_id=actor_id,
-        message_type="end_of_day_review",
-        text=text,
+    body = _ProactiveBody(
+        text="\n".join(lines).strip(),
         card={
             "dedupe_key": dedupe_key,
             "date": today.isoformat(),
@@ -479,25 +537,18 @@ def build_end_of_day_review(
             "pending_count": str(len(pending_items)),
             "completed_today_count": str(len(completed_today)),
         },
+        dedupe_key=dedupe_key,
+        event_payload={"dedupe_key": dedupe_key, "actor_id": actor_id, "date": today.isoformat()},
     )
-    if reserve:
-        recorded = store.record_outbound_delivery(
-            dedupe_key=dedupe_key,
-            surface=message.surface,
-            recipient_id=message.recipient_id,
-            provider="slack",
-            provider_message_id="end-of-day-review-preview",
-            sent_at=now,
-            payload={"text": message.text, "card": message.card},
-        )
-        if not recorded:
-            return ()
-        store.append_event(
-            "briefing.end_of_day.created",
-            {"dedupe_key": dedupe_key, "actor_id": actor_id, "date": today.isoformat()},
-            occurred_at=now,
-        )
-    return (message,)
+    return emit_proactive(
+        store,
+        END_OF_DAY_REVIEW_SURFACE,
+        (body,),
+        now=now,
+        actor_id=actor_id,
+        reserve=reserve,
+        max_chars=max_chars,
+    )
 
 
 def morning_briefing_dedupe_key(actor_id: str, today: date) -> str:
@@ -514,6 +565,51 @@ def proactive_check_dedupe_key(proposal: Proposal, *, actor_id: str, today: date
 
 def end_of_day_review_dedupe_key(actor_id: str, today: date) -> str:
     return f"slack-end-of-day-review/{actor_id}/{today.isoformat()}"
+
+
+MORNING_BRIEFING_SURFACE = ProactiveSurface(
+    name="morning_briefing",
+    message_type="morning_briefing",
+    event_type="briefing.morning.created",
+    provider_message_id="morning-briefing-preview",
+    dedupe_key=morning_briefing_dedupe_key,
+    build=build_morning_briefing,
+)
+
+AFTERNOON_BRIEFING_SURFACE = ProactiveSurface(
+    name="afternoon_briefing",
+    message_type="afternoon_briefing",
+    event_type="briefing.afternoon.created",
+    provider_message_id="afternoon-briefing-preview",
+    dedupe_key=afternoon_briefing_dedupe_key,
+    build=build_afternoon_briefing,
+)
+
+PROACTIVE_CHECK_SURFACE = ProactiveSurface(
+    name="proactive_check",
+    message_type="due_work_check",
+    event_type="proactive_check.created",
+    provider_message_id="proactive-check-preview",
+    dedupe_key=proactive_check_dedupe_key,
+    build=build_proactive_checks,
+    truncate=False,
+)
+
+END_OF_DAY_REVIEW_SURFACE = ProactiveSurface(
+    name="end_of_day_review",
+    message_type="end_of_day_review",
+    event_type="briefing.end_of_day.created",
+    provider_message_id="end-of-day-review-preview",
+    dedupe_key=end_of_day_review_dedupe_key,
+    build=build_end_of_day_review,
+)
+
+PROACTIVE_SURFACES: tuple[ProactiveSurface, ...] = (
+    MORNING_BRIEFING_SURFACE,
+    AFTERNOON_BRIEFING_SURFACE,
+    PROACTIVE_CHECK_SURFACE,
+    END_OF_DAY_REVIEW_SURFACE,
+)
 
 
 def _proposal_lines(
@@ -536,13 +632,13 @@ def _proposal_lines(
         else _sort_key
     )
     for proposal in sorted(proposals, key=sort_key):
-        anchor = _section_anchor(proposal, all_by_id, visible_ids)
+        anchor = section_anchor(proposal, all_by_id, visible_ids)
         if anchor.proposal_id in seen:
             continue
         seen.add(anchor.proposal_id)
         lines.append(_proposal_line(anchor, today=today))
         all_children = child_proposals(anchor, all_items)
-        visible_children = _display_children(all_children, max_completed_children=2)
+        visible_children = display_children(all_children, max_completed_children=2)
         if all_children:
             lines.append(_subtask_summary_line(all_children, visible_children))
         for index, child in enumerate(visible_children):
@@ -552,7 +648,7 @@ def _proposal_lines(
 
 
 def _proposal_line(proposal: Proposal, *, today: date | None) -> str:
-    if _is_workflow_context_parent(proposal):
+    if is_workflow_context_parent(proposal):
         label = _title_display(proposal)
         return f"- {label} — 하위작업 중심으로 확인합니다."
     return f"- {render_confirmed_sentence(proposal)}{_overdue_label(proposal, today=today)}"
@@ -579,7 +675,7 @@ def _subtask_line(proposal: Proposal, *, today: date | None) -> str:
     when = human_when_label(proposal)
     when_part = ""
     if when:
-        when_kind = "일정" if proposal.kind == "event" or proposal.scheduled_date is not None else "마감"
+        when_kind = "일정" if KIND_SPECS[proposal.kind].schedulable or proposal.scheduled_date is not None else "마감"
         when_part = f"{when_kind} {when}"
     parts = [
         _status_display(proposal.status),
@@ -599,48 +695,6 @@ def _title_display(proposal: Proposal) -> str:
     if proposal.status in {"done", "applied"}:
         return f"~{proposal.title}~"
     return proposal.title
-
-
-def _section_anchor(proposal: Proposal, proposals_by_id: dict[str, Proposal], visible_ids: set[str]) -> Proposal:
-    current = proposal
-    anchor: Proposal | None = None
-    seen: set[str] = set()
-    while True:
-        parent_id = parent_proposal_id(current)
-        parent = proposals_by_id.get(parent_id) if parent_id else None
-        if parent is None or parent.proposal_id in seen:
-            break
-        seen.add(parent.proposal_id)
-        if parent.proposal_id in visible_ids or _is_workflow_context_parent(parent):
-            anchor = parent
-        current = parent
-    return anchor or proposal
-
-
-def _display_children(children: tuple[Proposal, ...], *, max_completed_children: int) -> tuple[Proposal, ...]:
-    completed = [child for child in children if child.status in {"done", "applied"}]
-    if len(completed) <= max_completed_children:
-        return children
-    recent_completed_ids = {
-        child.proposal_id
-        for child in sorted(completed, key=_completion_sort_key, reverse=True)[:max_completed_children]
-    }
-    return tuple(
-        child
-        for child in children
-        if child.status not in {"done", "applied"} or child.proposal_id in recent_completed_ids
-    )
-
-
-def _completion_sort_key(proposal: Proposal) -> tuple[str, str]:
-    completed_at = proposal.metadata.get("completed_at", "")
-    updated_at = proposal.updated_at.isoformat(timespec="seconds") if proposal.updated_at else ""
-    created_at = proposal.created_at.isoformat(timespec="seconds") if proposal.created_at else ""
-    return (completed_at or updated_at or created_at, proposal.proposal_id)
-
-
-def _is_workflow_context_parent(proposal: Proposal) -> bool:
-    return proposal.metadata.get("workflow_container") == "true" or proposal.metadata.get(WORKFLOW_ROLE_KEY) == WORKFLOW_PARENT_ROLE
 
 
 def _status_display(status: str) -> str:
@@ -735,36 +789,13 @@ def _proposal_due_detail(proposal: Proposal, *, today: date) -> str:
     return f"{work_item_due_detail_label(proposal, today=today)}: " + " ".join(parts)
 
 
-def _proposal_date(proposal: Proposal) -> date | None:
-    return proposal.scheduled_date or proposal.due_date
-
-
-def _sort_key(proposal: Proposal) -> tuple[str, str, str]:
-    proposal_date = _proposal_date(proposal)
-    return (
-        proposal_date.isoformat() if proposal_date else "9999-12-31",
-        proposal.time_window,
-        proposal.title,
-    )
-
-
-def _is_personal_scope(proposal: Proposal, actor_id: str) -> bool:
-    participants = {item.strip() for item in proposal.metadata.get("participants", "").split(",") if item.strip()}
-    return (
-        actor_id
-        in {
-            proposal.assigned_to,
-            proposal.proposer_id,
-            *proposal.required_approvers,
-            *proposal.approvals,
-            *participants,
-        }
-        or proposal.assigned_to in {"shared", "unassigned"}
-    )
+_proposal_date = schedule_first_date
+_sort_key = schedule_first_sort_key
+_is_personal_scope = is_personal_scope
 
 
 def _completed_on(proposal: Proposal, *, today: date) -> bool:
-    completed_at = proposal.metadata.get("completed_at", "")
+    completed_at = proposal.metadata.get(COMPLETED_AT_KEY, "")
     if completed_at:
         try:
             return datetime.fromisoformat(completed_at).date() == today

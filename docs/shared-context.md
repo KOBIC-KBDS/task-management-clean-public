@@ -23,6 +23,7 @@ Keep this file public-safe:
 - Prefer semantic evidence over brittle exact-message matching. Regression tests should use sanitized scenarios that represent a class of failures, not a single private incident.
 - Preserve clean-install boundaries: blank token templates, no runtime DB/log files, no private Slack identifiers, and no task-core source copied into this repo.
 - Preserve preview-only task-core behavior unless a future task explicitly changes the write contract.
+- Keep the orchestrator as a thin coordinator. New runtime behavior should land in focused services such as proposal intake, semantic patch application, approval flow, workflow batch handling, outbound delivery, source/channel refs, time parsing, or surface registries before it grows the coordinator again.
 
 ## Current Runtime Safety Rules
 
@@ -37,6 +38,7 @@ Keep this file public-safe:
 
 | Date | Actor | Area | What changed | Verification |
 | --- | --- | --- | --- | --- |
+| 2026-06-13 | Codex | OMC refactor sync / architecture | Ported the large OMC runtime refactor into the clean public branch: Slack delivery retries and stable ids, same-day deferred reminders, extracted approval/proposal/semantic/workflow services, provider-generic outbound delivery, channel/source reference registries, unified Korean time sorting, kind/reconciler/surface registries, prep-subtask builder, runtime guards, and updated CodeBoarding inventory. Clean-only install defaults and public-safe paths were preserved. | `clean_mirror_sync.py check-worktree --base main`: ok; `python -X utf8 -m pytest -q`: 296 passed; `git diff --check`: ok; public-safety grep for tokens/Slack ids/private IPs: no hits. |
 | 2026-06-13 | Codex | semantic routing / approvals / surfaces | Ported pending-card hijack protection: semantic rejection patches now close approvals, low-evidence meeting-like patches fall back to new-work creation, half-hour meeting parsing defaults to today for event context, public-safe source questions no longer require dates, and rejected/done items are excluded from blocked preview counts. | `python -X utf8 -m pytest -q` on clean tree via shared test venv: 258 passed. |
 
 ## Open Questions / Watchpoints
@@ -45,6 +47,7 @@ Keep this file public-safe:
 - If new agent backends are added, they must return the same strict decision envelope and must be covered by fixture tests.
 - If Slack Home, briefing, or dashboard rendering changes, confirm all three surfaces keep the same hierarchy/preview semantics.
 - If task/event duplicate collapse is broadened, keep it conservative and preserve an audit trail for merged duplicates.
+- If service extraction continues, keep the public docs in sync: `docs/agent-flow.md` is the operator narrative, while `docs/codeboarding/` is static inventory evidence and should not contain local absolute paths.
 
 ## Useful Entry Points
 
@@ -53,6 +56,7 @@ Keep this file public-safe:
 - Slack setup guides: `ops/slack_bot_connection_guide.md`, `ops/slack_app_settings_guide.md`, `ops/fresh_demo_install.md`
 - Backend handoff: `ops/claude_code_backend_handoff.md`
 - Core orchestration: `task_management/orchestrator.py`
+- Service seams: `task_management/proposal_intake.py`, `task_management/semantic_patch_service.py`, `task_management/approval_flow.py`, `task_management/workflow_batch.py`, `task_management/outbound_delivery.py`
 - Semantic prompt contract: `task_management/operating_agent_prompt.py`
 - Slot policy: `task_management/slot_validator.py`
 - Human surfaces: `task_management/frontend.py`, `task_management/slack_home.py`, `task_management/secretary.py`

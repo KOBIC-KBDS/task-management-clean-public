@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from .relations import (
+    DATE_WINDOW_END_KEY,
+    DATE_WINDOW_START_KEY,
+    EXTERNAL_PARTICIPANTS_KEY,
+    LOCATION_KEY,
+    LOCATION_OPTIONAL_KEY,
+    NEEDS_EXACT_TIME_KEY,
+    PARTICIPANTS_KEY,
+    PARTICIPANT_LABEL_KEY,
+)
+
 from dataclasses import replace
 from datetime import date, datetime
 import re
@@ -34,7 +45,7 @@ def normalize_external_collaboration_candidate(
     external_owner = _external_owner(metadata)
     if external_owner:
         metadata.setdefault("external_owner", external_owner)
-    metadata["participants"] = _csv_append(metadata.get("participants", ""), internal_owner)
+    metadata[PARTICIPANTS_KEY] = _csv_append(metadata.get(PARTICIPANTS_KEY, ""), internal_owner)
 
     assigned_to = candidate.assigned_to
     if assigned_to == "unassigned":
@@ -81,11 +92,11 @@ def _normalize_work_discussion_context(
     """
 
     metadata = dict(candidate.metadata)
-    if metadata.get("location") or metadata.get("location_optional") == "true":
+    if metadata.get(LOCATION_KEY) or metadata.get(LOCATION_OPTIONAL_KEY) == "true":
         return candidate
     haystack = f"{candidate.raw_text} {candidate.title} {message.text}"
     if _looks_like_discussion_without_required_place(haystack, metadata):
-        metadata["location_optional"] = "true"
+        metadata[LOCATION_OPTIONAL_KEY] = "true"
         metadata.setdefault("location_policy", "optional_for_work_discussion")
         return replace(candidate, metadata=metadata)
     return candidate
@@ -93,7 +104,7 @@ def _normalize_work_discussion_context(
 
 def _looks_like_discussion_without_required_place(text: str, metadata: dict[str, str]) -> bool:
     has_discussion = any(token in text for token in ("논의", "회의", "미팅", "얘기", "이야기"))
-    has_counterpart = bool(metadata.get("external_participants") or metadata.get("participant_label")) or bool(
+    has_counterpart = bool(metadata.get(EXTERNAL_PARTICIPANTS_KEY) or metadata.get(PARTICIPANT_LABEL_KEY)) or bool(
         re.search(r"[가-힣]{2,4}\s*(?:박사님|선생님|교수님|님)", text)
     )
     explicit_location_need = any(token in text for token in ("장소 필요", "장소가 필요", "장소 정", "장소 미정"))
@@ -117,18 +128,18 @@ def _normalize_tentative_decision_context(
     metadata = dict(candidate.metadata)
     haystack = f"{candidate.raw_text} {candidate.title}"
     full_text = message.text
-    has_tentative_window = bool(metadata.get("date_window_start") and metadata.get("date_window_end")) and any(
+    has_tentative_window = bool(metadata.get(DATE_WINDOW_START_KEY) and metadata.get(DATE_WINDOW_END_KEY)) and any(
         token in haystack for token in ("예상", "할듯", "쯤", "초", "중순", "말", "미정")
     )
     schedule_will_be_decided = any(token in full_text for token in ("일정 논의", "일정도", "논의도", "진행할 것", "결정"))
     if not (has_tentative_window and schedule_will_be_decided):
         return candidate
     metadata.pop("needs_exact_date", None)
-    metadata.pop("needs_exact_time", None)
+    metadata.pop(NEEDS_EXACT_TIME_KEY, None)
     metadata["date_resolution_policy"] = "decide_in_scheduled_discussion"
     metadata["decision_pending"] = "true"
     metadata["time_optional"] = "true"
-    metadata["location_optional"] = "true"
+    metadata[LOCATION_OPTIONAL_KEY] = "true"
     metadata.setdefault("floating_reason", "future_schedule_to_be_decided_in_discussion")
     return replace(
         candidate,
@@ -145,14 +156,14 @@ def _looks_like_external_counterpart_context(candidate: TeamTaskTaskCandidate, m
         for value in (
             candidate.raw_text,
             candidate.title,
-            metadata.get("participant_label", ""),
-            metadata.get("external_participants", ""),
+            metadata.get(PARTICIPANT_LABEL_KEY, ""),
+            metadata.get(EXTERNAL_PARTICIPANTS_KEY, ""),
             metadata.get("external_owner", ""),
         )
         if value
     )
     return "담당자" in haystack and bool(
-        metadata.get("external_participants") or re.search(r"[가-힣]{2,4}\s*선생님", haystack)
+        metadata.get(EXTERNAL_PARTICIPANTS_KEY) or re.search(r"[가-힣]{2,4}\s*선생님", haystack)
     )
 
 
@@ -161,7 +172,7 @@ def _internal_owner(sender_id: str) -> str:
 
 
 def _external_owner(metadata: dict[str, str]) -> str:
-    for value in (metadata.get("participant_label", ""), metadata.get("external_participants", "")):
+    for value in (metadata.get(PARTICIPANT_LABEL_KEY, ""), metadata.get(EXTERNAL_PARTICIPANTS_KEY, "")):
         owner = _first_teacher_name_after_owner_marker(value)
         if owner:
             return owner

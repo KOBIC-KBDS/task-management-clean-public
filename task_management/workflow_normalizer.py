@@ -6,10 +6,14 @@ from datetime import datetime
 import hashlib
 import re
 
-from .domain import Proposal
+from .domain import KIND_SPECS, Proposal
 from .relations import (
     DEPENDS_ON_PROPOSAL_IDS_KEY,
+    MERGED_INTO_PROPOSAL_ID_KEY,
     PARENT_PROPOSAL_ID_KEY,
+    RELATION_TYPE_KEY,
+    SOURCE_CHANNEL_KEY,
+    SOURCE_PROVIDER_KEY,
     STEP_COUNT_KEY,
     STEP_INDEX_KEY,
     WORKFLOW_ID_KEY,
@@ -60,9 +64,20 @@ _PLANNING_MARKERS = (
     "prep",
     "planning",
 )
+_COUNTING_MEASURE_STOPWORDS = {
+    "동안",
+    "째",
+    "연속",
+    "정도",
+    "차",
+    "번",
+    "차례",
+    "여",
+}
 _TOPIC_STOPWORDS = {
     "제",
     "회",
+    *_COUNTING_MEASURE_STOPWORDS,
     "일정",
     "결정",
     "논의",
@@ -253,7 +268,7 @@ def _normalize_linked_completion_sources(
                 metadata.get(DEPENDS_ON_PROPOSAL_IDS_KEY, ""),
                 completed.proposal_id,
             )
-            metadata.setdefault("relation_type", "workflow_completion_evidence")
+            metadata.setdefault(RELATION_TYPE_KEY, "workflow_completion_evidence")
             metadata["workflow_relation_normalized"] = "true"
             metadata["workflow_completion_source_for_proposal_id"] = completed.proposal_id
             metadata.setdefault("workflow_graph_normalized_at", normalized_at.isoformat(timespec="seconds"))
@@ -288,11 +303,11 @@ def _normalize_multi_parent_dependencies(by_id: dict[str, Proposal]) -> tuple[Pr
         if len(roots) == 1:
             root = next(iter(roots.values()))
             metadata[PARENT_PROPOSAL_ID_KEY] = root.proposal_id
-            metadata["relation_type"] = metadata.get("relation_type", "multi_parent_workflow_dependency")
+            metadata[RELATION_TYPE_KEY] = metadata.get(RELATION_TYPE_KEY, "multi_parent_workflow_dependency")
             normalized = _normalize_parent_relation(replace(proposal, metadata=metadata), root=root, parent=root)
         else:
             metadata.pop(PARENT_PROPOSAL_ID_KEY, None)
-            metadata["relation_type"] = metadata.get("relation_type", "dependency_only")
+            metadata[RELATION_TYPE_KEY] = metadata.get(RELATION_TYPE_KEY, "dependency_only")
             metadata["workflow_relation_normalized"] = "true"
             normalized = replace(proposal, metadata=metadata)
         if normalized != proposal:
@@ -350,7 +365,7 @@ def _create_dependency_workflow_containers(
             metadata.setdefault(WORKFLOW_ROLE_KEY, "child")
             metadata.setdefault(STEP_INDEX_KEY, str(index))
             metadata.setdefault(STEP_COUNT_KEY, str(len(ordered)))
-            metadata.setdefault("relation_type", "workflow_step")
+            metadata.setdefault(RELATION_TYPE_KEY, "workflow_step")
             metadata["workflow_relation_normalized"] = "true"
             children.append(replace(child, metadata=metadata))
         creations.append((parent, tuple(children)))
@@ -380,7 +395,7 @@ def _normalize_parent_relation(proposal: Proposal, *, root: Proposal, parent: Pr
                 current_parent_id,
             )
         metadata[PARENT_PROPOSAL_ID_KEY] = root.proposal_id
-        metadata.setdefault("relation_type", "post_event_followup")
+        metadata.setdefault(RELATION_TYPE_KEY, "post_event_followup")
         metadata["workflow_relation_normalized"] = "true"
 
     if metadata.get(PARENT_PROPOSAL_ID_KEY) == proposal.proposal_id:
@@ -393,6 +408,61 @@ def _normalize_parent_relation(proposal: Proposal, *, root: Proposal, parent: Pr
         metadata["workflow_group_id"] = f"workflow-group/{root.proposal_id}"
 
     return replace(proposal, metadata=metadata)
+
+
+def match_source_text_duplicate(
+    proposal: Proposal,
+    existing_proposals: tuple[Proposal, ...],
+) -> Proposal | None:
+    """Find an existing canonical proposal that re-states the same commitment.
+
+    Used at intake to suppress a second live card when the user re-sends an
+    identical note after a prior merge.  A match requires the same
+    ``source_text_hash`` AND the same normalized title, commitment date, and
+    normalized time window.  Rejected/merged proposals are never canonical.
+    """
+
+    source_hash = proposal.metadata.get("source_text_hash", "").strip()
+    if not source_hash:
+        return None
+    if proposal.status == "rejected" or proposal.metadata.get(MERGED_INTO_PROPOSAL_ID_KEY):
+        return None
+    proposal_title = _normalize_title(proposal.title)
+    proposal_date = _commitment_date(proposal)
+    proposal_time = _normalize_time_window(proposal.time_window)
+    if not (proposal_title and proposal_date):
+        return None
+    for existing in existing_proposals:
+        if existing.proposal_id == proposal.proposal_id:
+            continue
+        if existing.status == "rejected" or existing.metadata.get(MERGED_INTO_PROPOSAL_ID_KEY):
+            continue
+        if existing.metadata.get("source_text_hash", "").strip() != source_hash:
+            continue
+        if _normalize_title(existing.title) != proposal_title:
+            continue
+        if _commitment_date(existing) != proposal_date:
+            continue
+        if _normalize_time_window(existing.time_window) != proposal_time:
+            continue
+        return existing
+    return None
+
+
+def mark_source_text_duplicate(
+    proposal: Proposal,
+    canonical: Proposal,
+    *,
+    normalized_at: datetime,
+) -> Proposal:
+    """Mark ``proposal`` as a merged duplicate of ``canonical`` (INVARIANT 3 shape)."""
+
+    return _mark_merged_duplicate(
+        proposal,
+        canonical=canonical,
+        normalized_at=normalized_at,
+        reason="same_source_text_hash_title_date_time_duplicate",
+    )
 
 
 def _normalize_new_duplicate_commitment(
@@ -487,9 +557,9 @@ def _normalize_duplicate_commitments(
 def _is_duplicate_commitment_candidate(proposal: Proposal) -> bool:
     if proposal.status not in {"draft", "approved", "applied"}:
         return False
-    if proposal.kind not in {"task", "event"}:
+    if not KIND_SPECS[proposal.kind].duplicate_merge_participant:
         return False
-    if proposal.metadata.get("merged_into_proposal_id"):
+    if proposal.metadata.get(MERGED_INTO_PROPOSAL_ID_KEY):
         return False
     if parent_proposal_id(proposal):
         return False
@@ -561,7 +631,7 @@ def _mark_merged_duplicate(
         metadata.setdefault("merged_original_scheduled_date", duplicate.scheduled_date.isoformat())
     if duplicate.time_window:
         metadata.setdefault("merged_original_time_window", duplicate.time_window)
-    metadata["merged_into_proposal_id"] = canonical.proposal_id
+    metadata[MERGED_INTO_PROPOSAL_ID_KEY] = canonical.proposal_id
     metadata["merged_into_title"] = canonical.title
     metadata["merged_reason"] = reason
     metadata["duplicate_commitment_normalized_at"] = normalized_at.isoformat(timespec="seconds")
@@ -706,6 +776,8 @@ def _series_title(text: str) -> str:
     topic = match.group(2).strip(" -_/·")
     if not topic:
         return ""
+    if topic in _COUNTING_MEASURE_STOPWORDS:
+        return ""
     return f"제{match.group(1)}회 {topic}"
 
 
@@ -790,10 +862,10 @@ def _synthetic_workflow_parent(
     metadata["workflow_backfill_created"] = "true"
     metadata["workflow_backfill_child_ids"] = ",".join(child.proposal_id for child in children)
     metadata["workflow_group_id"] = f"workflow-group/{proposal_id}"
-    if first.metadata.get("source_channel"):
-        metadata["source_channel"] = first.metadata["source_channel"]
-    if first.metadata.get("source_provider"):
-        metadata["source_provider"] = first.metadata["source_provider"]
+    if first.metadata.get(SOURCE_CHANNEL_KEY):
+        metadata[SOURCE_CHANNEL_KEY] = first.metadata[SOURCE_CHANNEL_KEY]
+    if first.metadata.get(SOURCE_PROVIDER_KEY):
+        metadata[SOURCE_PROVIDER_KEY] = first.metadata[SOURCE_PROVIDER_KEY]
     return Proposal(
         proposal_id=proposal_id,
         source_message_id=first.source_message_id,

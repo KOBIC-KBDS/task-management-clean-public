@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 from datetime import datetime
-import hashlib
 import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
 from typing import Any, Iterable
 
-from .domain import ADAPTER_SCHEMA, TASK_EXPORT_SCHEMA, TeamTaskTaskCandidate, Proposal
+from .domain import ADAPTER_SCHEMA, KIND_SPECS, TASK_EXPORT_SCHEMA, TeamTaskTaskCandidate, Proposal
 from .relations import (
+    DATE_WINDOW_END_KEY,
+    DATE_WINDOW_START_KEY,
+    SOURCE_CHANNEL_KEY,
     WORKFLOW_GROUP_CHILD_IDS_KEY,
     is_workflow_parent,
     parent_proposal_id,
 )
+from .source_refs import text_hash as _text_hash
 
 
 DEFAULT_TASK_CORE_PATH = Path.home() / "claudecode" / "llm-wiki"
@@ -155,7 +158,7 @@ def _candidate_to_export_item(candidate: TeamTaskTaskCandidate, *, captured_at: 
         "id": capture_id,
         "raw_text": candidate.raw_text,
         "captured_at": captured_at,
-        "source_channel": "task_management-discussion",
+        SOURCE_CHANNEL_KEY: "task_management-discussion",
         "task_status": task_status,
         "board": board,
         "disposition": disposition,
@@ -193,8 +196,8 @@ def _proposal_to_candidate(proposal: Proposal) -> TeamTaskTaskCandidate:
         scheduled_date=proposal.scheduled_date,
         time_window=proposal.time_window,
         task_status="active",
-        item_type=proposal.kind if proposal.kind in {"reference", "event", "routine"} else "task",
-        disposition="reference" if proposal.kind == "reference" else "execution",
+        item_type=KIND_SPECS[proposal.kind].export_item_type,
+        disposition=KIND_SPECS[proposal.kind].export_disposition,
         needs_review=bool(proposal.missing_slots),
         source_url=proposal.source_url,
         source_export_path=proposal.source_export_path,
@@ -288,8 +291,8 @@ def _builtin_task_import_preview_payload(payload: dict[str, Any], *, root: str |
         for item in items
         if isinstance(item.get("metadata", {}), dict)
         and (
-            item["metadata"].get("date_window_start")
-            or item["metadata"].get("date_window_end")
+            item["metadata"].get(DATE_WINDOW_START_KEY)
+            or item["metadata"].get(DATE_WINDOW_END_KEY)
             or item["metadata"].get("needs_exact_date") == "true"
         )
     ]
@@ -343,8 +346,3 @@ def _missing_slots_for_export(
     if candidate.metadata.get("needs_exact_date") == "true" and "exact_date" not in missing:
         missing.append("exact_date")
     return missing
-
-
-def _text_hash(text: str) -> str:
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"

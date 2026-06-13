@@ -22,6 +22,7 @@ from .kakao_export_adapter import parse_kakao_text_export
 from .openai_operating_agent import OpenAIResponsesOperatingAgent
 from .operating_agent import TeamTaskOperatingAgent, RuleBasedTeamTaskOperatingAgent
 from .orchestrator import TeamTaskOrchestrator
+from .outbound_delivery import OUTBOUND_KEY_PREFIX
 from .reminders import build_due_reminders
 from .secretary import (
     build_afternoon_briefing,
@@ -960,6 +961,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         else:
             config = SlackDmConfig.from_env()
+            if args.send:
+                _require_slack_send_ready(config)
             try:
                 adapter = SlackDmAdapter(
                     config,
@@ -1012,6 +1015,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         else:
             config = SlackDmConfig.from_env()
+            if args.send:
+                _require_slack_send_ready(config)
             try:
                 adapter = SlackDmAdapter(
                     config,
@@ -1165,10 +1170,26 @@ def _with_forced_dedupe(messages, *, suffix: str):
     forced = []
     for message in messages:
         card = dict(message.card)
-        base = card.get("dedupe_key") or f"slack-outbound/{message.recipient_id}/{message.message_type}"
+        base = card.get("dedupe_key") or f"{OUTBOUND_KEY_PREFIX}/{message.recipient_id}/{message.message_type}"
         card["dedupe_key"] = f"{base}/force/{suffix}"
         forced.append(replace(message, card=card))
     return tuple(forced)
+
+
+def _require_slack_send_ready(config: SlackDmConfig) -> None:
+    """Refuse to poll a live Slack cycle when sending is impossible.
+
+    Mirrors how slack-socket-loop refuses to start: when --send is requested but
+    the live config cannot send (e.g. TASK_MANAGEMENT_ALLOWED_INSTANCE_ID is set
+    while TASK_MANAGEMENT_INSTANCE_ID is empty/mismatched), exit BEFORE polling so
+    inbound messages are never recorded or last_ts advanced. Otherwise the guard
+    would only trip at send time and the replies would be permanently lost.
+    """
+
+    check = diagnose_slack_live_config(config)
+    if not check.can_send:
+        detail = "; ".join(check.errors) or "Slack live config cannot send."
+        raise SystemExit(f"Slack live send refused before polling: {detail}")
 
 
 def _send_personal_messages(store: TeamTaskStore, messages, *, sent_at: datetime) -> None:
@@ -1223,6 +1244,8 @@ def _run_dogfood_loop(args: argparse.Namespace, store: TeamTaskStore) -> dict[st
             )
         else:
             config = SlackDmConfig.from_env()
+            if args.send:
+                _require_slack_send_ready(config)
             try:
                 adapter = SlackDmAdapter(
                     config,

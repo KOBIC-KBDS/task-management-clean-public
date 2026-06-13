@@ -4,12 +4,14 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import json
 import os
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 from urllib import request as urlrequest
 from urllib.parse import urlencode
 
 from .domain import IncomingMessage, OrchestrationResult, OutboundMessage
 from .orchestrator import TeamTaskOrchestrator
+from .outbound_delivery import outbound_dedupe_key
+from .runtime_guard import reply_instance_rejection as _reply_instance_rejection
 from .store import TeamTaskStore
 
 
@@ -18,6 +20,27 @@ class SlackAdapterError(RuntimeError):
 
 
 SLACK_PERSONAL_DM_BOT_SCOPES = ("chat:write", "im:history", "im:write", "reactions:write")
+
+# Maximum number of send attempts for a queued outbound message before it is
+# marked terminally 'failed'. Until the cap is reached a failed send is left
+# 'pending' so the next drain retries it.
+MAX_OUTBOUND_SEND_ATTEMPTS = 5
+
+
+class LiveChatTransport(Protocol):
+    """Provider-generic outbound/inbound seam the generic queue/drain depend on.
+
+    The generic ``drain_outbound_queue`` only needs ``send_personal`` to push a
+    queued reply; ``poll_messages`` rounds out the live-runtime contract so a
+    transport doubles as the inbound source.  ``SlackDmAdapter`` already
+    satisfies both (``send_personal`` returns the provider ts/id string).
+    """
+
+    def poll_messages(self) -> tuple[IncomingMessage, ...]:
+        """Return newly observed chat messages without mutating orchestration state."""
+
+    def send_personal(self, actor_id: str, text: str) -> str:
+        """Send text to one person's private chat; return the provider message id."""
 
 
 @dataclass(frozen=True)
@@ -420,13 +443,28 @@ def run_slack_dm_once(
         result = orchestrator.handle_message(message)
         results.append(result)
         outbound.extend(result.outbound_messages)
+        if send and result.outbound_messages:
+            # Salt the fallback dedupe key with the triggering inbound id so two
+            # distinct inbound messages that reduce to the same key are both
+            # delivered, while re-polling the same inbound stays deduped.
+            queue_slack_outbound(
+                store,
+                adapter,
+                tuple(result.outbound_messages),
+                queued_at=now,
+                source_message_id=message.message_id,
+            )
         ts = message.message_id.rsplit("/", 1)[-1]
         if not latest_ts or float(ts) > float(latest_ts):
             latest_ts = ts
+    if send and outbound:
+        # Drain (which sends via the Slack Web API) BEFORE advancing last_ts so a
+        # send-side failure raises here and leaves the inbound messages
+        # re-pollable. Inbound dedupe via has_message still prevents reprocessing
+        # already-handled messages once last_ts advances on the next clean cycle.
+        drain_slack_outbound_queue(store, adapter, sent_at=now, raise_on_error=True)
     if latest_ts:
         store.set_integration_state(_last_ts_key(adapter.config.actor_id), latest_ts, updated_at=now)
-    if send and outbound:
-        dispatch_slack_outbound(store, adapter, tuple(outbound), sent_at=now)
     return SlackPollResult(messages=messages, results=tuple(results), outbound_messages=tuple(outbound))
 
 
@@ -441,22 +479,41 @@ def dispatch_slack_outbound(
     drain_slack_outbound_queue(store, adapter, sent_at=sent_at, raise_on_error=True)
 
 
-def queue_slack_outbound(
+# A delivery resolver maps an OutboundMessage to the (recipient_id, text) a
+# provider will actually send, or None to drop the message entirely.  Slack's
+# resolver folds team_room replies onto the personal DM actor (see
+# ``_slack_delivery``); other providers supply their own.
+DeliveryResolver = Callable[[OutboundMessage], "tuple[str, str] | None"]
+
+
+def queue_outbound(
     store: TeamTaskStore,
-    adapter: SlackDmAdapter,
+    transport: LiveChatTransport,
     messages: tuple[OutboundMessage, ...],
     *,
+    provider: str,
     queued_at: datetime,
+    source_message_id: str | None = None,
+    actor_id: str,
+    resolve_delivery: DeliveryResolver,
+    delivery_surface: str,
 ) -> int:
+    """Provider-generic enqueue core for outbound replies.
+
+    Event names are derived as ``f"{provider}.message.{queued|skipped}"`` and the
+    dedupe key uses the matching ``{provider}-outbound/`` prefix, so passing
+    ``provider="slack"`` reproduces every historical Slack event/key byte-for-byte.
+    """
+
     queued = 0
     for message in messages:
-        delivery = _slack_delivery(message, adapter=adapter)
+        delivery = resolve_delivery(message)
         if delivery is None:
             continue
         recipient_id, text = delivery
-        if recipient_id != adapter.config.actor_id:
+        if recipient_id != actor_id:
             store.append_event(
-                "slack.message.skipped",
+                f"{provider}.message.skipped",
                 {
                     "reason": "unsupported_recipient",
                     "recipient_id": recipient_id,
@@ -467,10 +524,15 @@ def queue_slack_outbound(
                 occurred_at=queued_at,
             )
             continue
-        dedupe_key = _outbound_dedupe_key(message, recipient_id=recipient_id)
+        dedupe_key = outbound_dedupe_key(
+            message,
+            recipient_id=recipient_id,
+            source_message_id=source_message_id,
+            provider=provider,
+        )
         if store.has_outbound_delivery(dedupe_key):
             store.append_event(
-                "slack.message.skipped",
+                f"{provider}.message.skipped",
                 {
                     "reason": "duplicate_dedupe_key",
                     "dedupe_key": dedupe_key,
@@ -484,7 +546,7 @@ def queue_slack_outbound(
             continue
         inserted = store.enqueue_outbound_message(
             dedupe_key=dedupe_key,
-            provider="slack",
+            provider=provider,
             surface=message.surface,
             recipient_id=recipient_id,
             message_type=message.message_type,
@@ -497,12 +559,12 @@ def queue_slack_outbound(
         if inserted:
             queued += 1
             store.append_event(
-                "slack.message.queued",
+                f"{provider}.message.queued",
                 {
                     "dedupe_key": dedupe_key,
                     "message": message,
                     "original_surface": message.surface,
-                    "delivery_surface": "slack_personal_dm",
+                    "delivery_surface": delivery_surface,
                     "recipient_id": recipient_id,
                 },
                 occurred_at=queued_at,
@@ -510,21 +572,31 @@ def queue_slack_outbound(
     return queued
 
 
-def drain_slack_outbound_queue(
+def drain_outbound_queue(
     store: TeamTaskStore,
-    adapter: SlackDmAdapter,
+    transport: LiveChatTransport,
     *,
+    provider: str,
     sent_at: datetime,
     limit: int = 100,
     raise_on_error: bool = False,
+    actor_id: str,
+    delivery_surface: str,
 ) -> int:
+    """Provider-generic drain core: send each pending row via ``transport``.
+
+    Event names are derived as ``f"{provider}.message.{skipped|failed|sent}"``.
+    The A2 retry cap (``MAX_OUTBOUND_SEND_ATTEMPTS``) and the leave-pending-on-
+    transient-failure behavior are reached identically for every provider.
+    """
+
     sent = 0
-    for item in store.list_pending_outbound_messages(provider="slack", limit=limit):
+    for item in store.list_pending_outbound_messages(provider=provider, limit=limit):
         dedupe_key = str(item["dedupe_key"])
         recipient_id = str(item["recipient_id"])
         text = str(item["text"])
         message = _outbound_message_from_queue(item["message"])
-        if recipient_id != adapter.config.actor_id:
+        if recipient_id != actor_id:
             store.mark_outbound_message(
                 dedupe_key,
                 status="skipped",
@@ -532,7 +604,7 @@ def drain_slack_outbound_queue(
                 last_error="unsupported_recipient",
             )
             store.append_event(
-                "slack.message.skipped",
+                f"{provider}.message.skipped",
                 {
                     "reason": "unsupported_recipient",
                     "recipient_id": recipient_id,
@@ -547,17 +619,19 @@ def drain_slack_outbound_queue(
             store.mark_outbound_message(dedupe_key, status="sent", updated_at=sent_at)
             continue
         try:
-            provider_message_id = adapter.send_personal(recipient_id, text)
+            provider_message_id = transport.send_personal(recipient_id, text)
         except Exception as exc:
+            attempts = int(item.get("attempts") or 0) + 1
+            retryable = attempts < MAX_OUTBOUND_SEND_ATTEMPTS
             store.mark_outbound_message(
                 dedupe_key,
-                status="failed",
+                status="pending" if retryable else "failed",
                 updated_at=sent_at,
                 last_error=str(exc),
                 increment_attempts=True,
             )
             store.append_event(
-                "slack.message.failed",
+                f"{provider}.message.failed",
                 {
                     "dedupe_key": dedupe_key,
                     "message_type": item["message_type"],
@@ -565,6 +639,8 @@ def drain_slack_outbound_queue(
                     "approval_request_id": item["approval_request_id"],
                     "error_type": type(exc).__name__,
                     "error": str(exc)[:500],
+                    "attempts": attempts,
+                    "retryable": retryable,
                 },
                 occurred_at=sent_at,
             )
@@ -575,13 +651,13 @@ def drain_slack_outbound_queue(
             dedupe_key=dedupe_key,
             surface=message.surface,
             recipient_id=recipient_id,
-            provider="slack",
+            provider=provider,
             provider_message_id=provider_message_id,
             sent_at=sent_at,
             payload={
                 "text": text,
                 "original_surface": message.surface,
-                "delivery_surface": "slack_personal_dm",
+                "delivery_surface": delivery_surface,
                 "card": message.card,
             },
         )
@@ -593,18 +669,71 @@ def drain_slack_outbound_queue(
             increment_attempts=True,
         )
         store.append_event(
-            "slack.message.sent",
+            f"{provider}.message.sent",
             {
                 "dedupe_key": dedupe_key,
                 "message": message,
                 "original_surface": message.surface,
-                "delivery_surface": "slack_personal_dm",
+                "delivery_surface": delivery_surface,
                 "recipient_id": recipient_id,
             },
             occurred_at=sent_at,
         )
         sent += 1
     return sent
+
+
+def queue_slack_outbound(
+    store: TeamTaskStore,
+    adapter: SlackDmAdapter,
+    messages: tuple[OutboundMessage, ...],
+    *,
+    queued_at: datetime,
+    source_message_id: str | None = None,
+) -> int:
+    """Thin Slack wrapper over ``queue_outbound`` (provider="slack").
+
+    Produces the exact ``slack.message.{queued,skipped}`` events and
+    ``slack-outbound/`` dedupe keys it always has.
+    """
+
+    return queue_outbound(
+        store,
+        adapter,
+        messages,
+        provider="slack",
+        queued_at=queued_at,
+        source_message_id=source_message_id,
+        actor_id=adapter.config.actor_id,
+        resolve_delivery=lambda message: _slack_delivery(message, adapter=adapter),
+        delivery_surface="slack_personal_dm",
+    )
+
+
+def drain_slack_outbound_queue(
+    store: TeamTaskStore,
+    adapter: SlackDmAdapter,
+    *,
+    sent_at: datetime,
+    limit: int = 100,
+    raise_on_error: bool = False,
+) -> int:
+    """Thin Slack wrapper over ``drain_outbound_queue`` (provider="slack").
+
+    Produces the exact ``slack.message.{skipped,failed,sent}`` events and keeps
+    the A2 retry cap and A3/A4 behavior identical to today.
+    """
+
+    return drain_outbound_queue(
+        store,
+        adapter,
+        provider="slack",
+        sent_at=sent_at,
+        limit=limit,
+        raise_on_error=raise_on_error,
+        actor_id=adapter.config.actor_id,
+        delivery_surface="slack_personal_dm",
+    )
 
 
 def _slack_delivery(message: OutboundMessage, *, adapter: SlackDmAdapter) -> tuple[str, str] | None:
@@ -634,12 +763,17 @@ def _last_ts_key(actor_id: str) -> str:
     return f"slack.dm.{actor_id}.last_ts"
 
 
-def _outbound_dedupe_key(message: OutboundMessage, *, recipient_id: str | None = None) -> str:
-    explicit = message.card.get("dedupe_key")
-    if explicit:
-        return explicit
-    stable = message.approval_request_id or message.proposal_id or message.text
-    return f"slack-outbound/{recipient_id or message.recipient_id}/{message.message_type}/{stable}"
+def _outbound_dedupe_key(
+    message: OutboundMessage,
+    *,
+    recipient_id: str | None = None,
+    source_message_id: str | None = None,
+) -> str:
+    # The dedupe-key format now lives in outbound_delivery; this stays as the
+    # slack_adapter-local name so existing call sites and references are intact.
+    return outbound_dedupe_key(
+        message, recipient_id=recipient_id, source_message_id=source_message_id
+    )
 
 
 def is_slack_personal_dm_channel_id(channel_id: str) -> bool:
@@ -673,19 +807,3 @@ def _bool_env(name: str, *, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() not in {"0", "false", "no", "off"}
-
-
-def _reply_instance_rejection(config: SlackDmConfig) -> str:
-    if not config.allowed_instance_id:
-        return ""
-    if not config.instance_id:
-        return (
-            "TASK_MANAGEMENT_ALLOWED_INSTANCE_ID is set, but TASK_MANAGEMENT_INSTANCE_ID is missing; "
-            "live Slack replies are disabled for this runtime."
-        )
-    if config.instance_id != config.allowed_instance_id:
-        return (
-            "Live Slack replies are disabled for runtime instance "
-            f"{config.instance_id!r}; expected {config.allowed_instance_id!r}."
-        )
-    return ""

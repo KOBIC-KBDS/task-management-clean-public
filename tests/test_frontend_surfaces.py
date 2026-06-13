@@ -527,3 +527,68 @@ def test_web_task_page_renders_event_time_and_participants(tmp_path) -> None:
     assert "참석 나/김센터 센터장님/이협업 선생님" in html
     assert "task-detail-this-week-codex-slack-DTEST-committee-1" in html
     assert "Source" in html
+
+
+def test_by_assignee_does_not_flag_workflow_container_overdue(tmp_path) -> None:
+    # Regression for BUG #19: a backfilled workflow container with an open child
+    # is suppressed from overdue in today/this-week/done because those sections
+    # pass full proposal context. The 담당자별 (by-assignee) section must do the
+    # same — it previously omitted proposals= so _suppress_parent_overdue could
+    # not see the child and flagged the container overdue only there.
+    sim = TeamTaskSimulator(tmp_path)
+    container = Proposal(
+        proposal_id="codex/slack/DTEST/workflow-container/1",
+        source_message_id="slack/DTEST/workflow-container",
+        proposer_id="me",
+        title="워크플로 컨테이너",
+        raw_text="워크플로 컨테이너",
+        kind="task",
+        status="approved",
+        assigned_to="me",
+        task_management_area="work",
+        discussion_id="slack/DTEST",
+        message_id="slack/DTEST/workflow-container",
+        required_approvers=("me",),
+        approvals=("me",),
+        due_date=date(2026, 5, 4),
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={"workflow_container": "true", "workflow_role": "parent"},
+    )
+    child = Proposal(
+        proposal_id="codex/slack/DTEST/workflow-child/1",
+        source_message_id="slack/DTEST/workflow-child",
+        proposer_id="me",
+        title="열린 하위작업",
+        raw_text="열린 하위작업",
+        kind="task",
+        status="approved",
+        assigned_to="me",
+        task_management_area="work",
+        discussion_id="slack/DTEST",
+        message_id="slack/DTEST/workflow-child",
+        required_approvers=("me",),
+        approvals=("me",),
+        due_date=date(2026, 5, 4),
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={"parent_proposal_id": container.proposal_id},
+    )
+    sim.store.save_proposal(container)
+    sim.store.save_proposal(child)
+
+    model = build_web_task_page_model(sim.store, today=date(2026, 5, 5))
+
+    today_container = next(
+        item for item in model["sections"]["today"] if item["proposal_id"] == container.proposal_id
+    )
+    assert today_container["is_overdue"] == ""
+    assert today_container["urgency_label"] == ""
+
+    by_assignee_container = next(
+        item
+        for item in model["sections"]["by_assignee"]["me"]
+        if item["proposal_id"] == container.proposal_id
+    )
+    assert by_assignee_container["is_overdue"] == ""
+    assert by_assignee_container["urgency_label"] == ""

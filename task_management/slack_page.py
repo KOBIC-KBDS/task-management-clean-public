@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from .relations import (
+    DATE_WINDOW_END_KEY,
+    DATE_WINDOW_LABEL_KEY,
+    DATE_WINDOW_START_KEY,
+    LINK_PREP_SUBTASK,
+    LINK_TYPE_KEY,
+    LOCATION_KEY,
+)
+
 from dataclasses import dataclass
 from datetime import date
 from typing import Iterable
 
-from .domain import ApprovalRequest, Proposal
+from .domain import KIND_SPECS, ApprovalRequest, Proposal
 from .human_view import (
     actor_label,
     date_label,
@@ -13,7 +22,9 @@ from .human_view import (
     proposal_participants_label,
     short_id,
 )
+from .sort_keys import schedule_first_sort_key
 from .store import TeamTaskStore
+from .work_item_state import is_personal_scope, schedule_first_date
 
 
 @dataclass(frozen=True)
@@ -50,7 +61,7 @@ def build_slack_monthly_task_page_model(
                 and _proposal_date(item) is not None
                 and month_start <= _proposal_date(item) <= month_end  # type: ignore[operator]
                 and item.kind not in {"reference", "routine"}
-                and item.metadata.get("link_type") != "prep_subtask"
+                and item.metadata.get(LINK_TYPE_KEY) != LINK_PREP_SUBTASK
             ),
             key=_sort_key,
         )
@@ -70,11 +81,11 @@ def build_slack_monthly_task_page_model(
             key=_sort_key,
         )
     )
-    routines = tuple(sorted((item for item in scoped if item.kind == "routine"), key=_sort_key))
+    routines = tuple(sorted((item for item in scoped if KIND_SPECS[item.kind].dashboard_section == "routines"), key=_sort_key))
     prep_subtasks = tuple(
-        sorted((item for item in scoped if item.metadata.get("link_type") == "prep_subtask"), key=_sort_key)
+        sorted((item for item in scoped if item.metadata.get(LINK_TYPE_KEY) == LINK_PREP_SUBTASK), key=_sort_key)
     )
-    references = tuple(sorted((item for item in scoped if item.kind == "reference"), key=_sort_key))
+    references = tuple(sorted((item for item in scoped if KIND_SPECS[item.kind].dashboard_section == "references"), key=_sort_key))
 
     return SlackMonthlyTaskPageModel(
         actor_id=actor_id,
@@ -139,7 +150,7 @@ def _proposal_line(proposal: Proposal) -> str:
     participants = _participants_label(proposal)
     if participants:
         chunks.append(f"참석 {_md_escape(participants)}")
-    location = proposal.metadata.get("location", "")
+    location = proposal.metadata.get(LOCATION_KEY, "")
     if location:
         chunks.append(f"장소 {_md_escape(location)}")
     if proposal.missing_slots:
@@ -184,28 +195,9 @@ def _month_bounds(month: date) -> tuple[date, date]:
     return start, date.fromordinal(next_month.toordinal() - 1)
 
 
-def _proposal_date(proposal: Proposal) -> date | None:
-    return proposal.scheduled_date or proposal.due_date
-
-
-def _sort_key(proposal: Proposal) -> tuple[str, str, str]:
-    proposal_date = _proposal_date(proposal)
-    return (proposal_date.isoformat() if proposal_date else "9999-12-31", proposal.time_window, proposal.title)
-
-
-def _is_personal_scope(proposal: Proposal, actor_id: str) -> bool:
-    actor_values = {
-        proposal.assigned_to,
-        proposal.proposer_id,
-        *proposal.required_approvers,
-        *proposal.approvals,
-    }
-    participants = proposal.metadata.get("participants", "")
-    return (
-        actor_id in actor_values
-        or proposal.assigned_to in {"shared", "unassigned"}
-        or actor_id in {item.strip() for item in participants.split(",")}
-    )
+_proposal_date = schedule_first_date
+_sort_key = schedule_first_sort_key
+_is_personal_scope = is_personal_scope
 
 
 def _when_label(proposal: Proposal | None) -> str:
@@ -217,12 +209,12 @@ def _when_label(proposal: Proposal | None) -> str:
         parts.append(date_label(proposal_date))
     if proposal.time_window:
         parts.append(proposal.time_window)
-    if proposal.metadata.get("date_window_start") and proposal.metadata.get("date_window_end"):
+    if proposal.metadata.get(DATE_WINDOW_START_KEY) and proposal.metadata.get(DATE_WINDOW_END_KEY):
         parts.append(
             date_window_display_label(
-                proposal.metadata["date_window_start"],
-                proposal.metadata["date_window_end"],
-                proposal.metadata.get("date_window_label", ""),
+                proposal.metadata[DATE_WINDOW_START_KEY],
+                proposal.metadata[DATE_WINDOW_END_KEY],
+                proposal.metadata.get(DATE_WINDOW_LABEL_KEY, ""),
             )
         )
     return " ".join(parts)

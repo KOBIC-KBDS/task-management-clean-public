@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import hashlib
+from .relations import (
+    INTAKE_POLICY_KEY,
+)
 
 from .domain import (
     ASSIGNEE_VALUES,
@@ -10,7 +12,11 @@ from .domain import (
     Proposal,
     ProposalKind,
 )
+from .channels import channel_for_message_id
 from .slot_validator import missing_slots_for_candidate
+from .source_refs import source_metadata, text_hash
+
+__all__ = ["source_metadata", "text_hash"]
 
 
 def proposal_from_candidate(candidate: TeamTaskTaskCandidate, *, message: IncomingMessage) -> Proposal:
@@ -79,35 +85,18 @@ def resolve_assignee(assigned_to: str, *, sender_id: str) -> str:
     return assigned_to
 
 
-def text_hash(text: str) -> str:
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
-
-
-def source_metadata(message_id: str) -> dict[str, str]:
-    if not message_id.startswith("slack/"):
-        return {}
-    parts = message_id.split("/")
-    if len(parts) < 3:
-        return {"source_provider": "slack"}
-    return {
-        "source_provider": "slack",
-        "source_channel": parts[1],
-        "source_ts": parts[2],
-    }
-
-
 def intake_metadata(message: IncomingMessage) -> dict[str, str]:
     metadata = {
         "source_visibility": message.visibility,
         "source_chat_id": message.chat_id,
     }
-    if message.visibility == "team" and message.message_id.startswith("slack/"):
+    channel = channel_for_message_id(message.message_id)
+    if message.visibility == "team" and channel is not None and channel.team_messages_confirmation_required:
         metadata.update(
             {
                 "notification_task_candidate": "true",
-                "intake_policy": "user_confirmation_required",
-                "intake_policy_reason": "slack_allowlisted_notification",
+                INTAKE_POLICY_KEY: "user_confirmation_required",
+                "intake_policy_reason": f"{channel.provider}_allowlisted_notification",
             }
         )
     return metadata

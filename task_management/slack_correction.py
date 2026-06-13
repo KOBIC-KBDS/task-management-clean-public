@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-import hashlib
 
 from .slack_adapter import SlackDmAdapter
+from .source_refs import text_hash as _text_hash
 from .store import TeamTaskStore
 
 
@@ -113,7 +113,3 @@ def recall_and_send_slack_correction(
         dedupe_key=stable_dedupe_key,
         text_hash=text_hash,
     )
-
-
-def _text_hash(text: str) -> str:
-    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()

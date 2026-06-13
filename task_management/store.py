@@ -47,6 +47,10 @@ class TeamTaskStore:
                 ),
             )
 
+    def delete_message(self, message_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("delete from messages where message_id = ?", (message_id,))
+
     def save_proposal(self, proposal: Proposal) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -106,6 +110,7 @@ class TeamTaskStore:
                 on conflict(request_id) do update set
                     status = excluded.status,
                     decided_at = excluded.decided_at
+                where approval_requests.status = 'pending'
                 """,
                 (
                     request.request_id,
@@ -449,6 +454,32 @@ class TeamTaskStore:
         for line in self.event_log_path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 events.append(json.loads(line))
+        return tuple(events)
+
+    def read_recent_events(self, max_events: int = 200, *, tail_bytes: int = 65536) -> tuple[dict[str, Any], ...]:
+        """Return only the most recent events without parsing the whole log.
+
+        Seeks ``tail_bytes`` from EOF and parses the trailing lines, returning
+        at most ``max_events`` events (oldest-first within that tail).  Intended
+        for hot inbound paths that only need a short recent window; for a full
+        replay use :meth:`read_events`.
+        """
+
+        if not self.event_log_path.exists():
+            return ()
+        file_size = self.event_log_path.stat().st_size
+        with self.event_log_path.open("rb") as handle:
+            seek_to = max(0, file_size - tail_bytes)
+            handle.seek(seek_to)
+            chunk = handle.read()
+        # Drop a leading partial line when we seeked into the middle of the file.
+        if seek_to > 0:
+            newline = chunk.find(b"\n")
+            chunk = chunk[newline + 1 :] if newline != -1 else b""
+        text = chunk.decode("utf-8")
+        events = [json.loads(line) for line in text.splitlines() if line.strip()]
+        if len(events) > max_events:
+            events = events[-max_events:]
         return tuple(events)
 
     def _connect(self) -> sqlite3.Connection:

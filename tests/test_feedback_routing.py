@@ -103,17 +103,6 @@ class CreateAndPatchAgent:
         )
 
 
-class FailIfCalledAgent:
-    def decide(
-        self,
-        message: IncomingMessage,
-        *,
-        pending_approval_requests: Sequence[ApprovalRequest],
-        pending_proposals: Sequence[Proposal],
-    ) -> OperatingAgentDecision:
-        raise AssertionError("explicit pending feedback should be handled before agent extraction")
-
-
 class NoActionSourceAgent:
     def __init__(self, source: str) -> None:
         self.source = source
@@ -733,3 +722,56 @@ def test_deictic_kickoff_feedback_still_updates_pending_question(tmp_path: Path)
     assert updated.scheduled_date == date(2026, 5, 26)
     assert updated.time_window == "15:00"
     assert updated.status == "approved"
+
+
+def test_other_actor_filling_slot_does_not_consume_required_approver_request(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    proposal = Proposal(
+        proposal_id="proposal/terms",
+        source_message_id="slack/DTEST/source-terms",
+        proposer_id="teammate",
+        title="약관 2차 수정안 검토 및 교육페이지 약관 추가",
+        raw_text="약관 2차 수정안 검토 및 교육페이지 약관 추가",
+        kind="question",
+        status="awaiting_approval",
+        assigned_to="teammate",
+        task_management_area="work",
+        discussion_id="private/DTEST/source-terms",
+        message_id="slack/DTEST/source-terms/1",
+        required_approvers=("teammate",),
+        missing_slots=("exact_date",),
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={
+            "participants": "teammate",
+            "materials": "통합이용약관, 통합포털 개인정보처리방침, scDB 약관, 교육페이지 이용약관",
+            "needs_exact_date": "true",
+        },
+    )
+    store.save_proposal(proposal)
+    store.save_approval_request(
+        ApprovalRequest(
+            request_id="approval/terms",
+            proposal_id="proposal/terms",
+            approver_id="teammate",
+            requested_at=NOW,
+        )
+    )
+    agent = NoActionSourceAgent("rule_based")
+
+    # Actor 'me' (not the required approver) fills the missing slot via the fallback reconciler.
+    TeamTaskOrchestrator(store, operating_agent=agent).handle_message(
+        _message("약관은 금요일 퇴근전까지 검토하면 돼", ts="1000.000011")
+    )
+
+    assert agent.calls == 1
+    # The required approver's pending request must NOT be consumed by another actor.
+    teammate_request = store.get_approval_request("approval/terms")
+    assert teammate_request is not None
+    assert teammate_request.status == "pending"
+    # The proposal must not be wrongly approved: the required approver still has to decide.
+    terms = store.get_proposal("proposal/terms")
+    assert terms is not None
+    assert terms.status == "awaiting_approval"
+    assert "teammate" in terms.required_approvers
+    assert "teammate" not in terms.approvals

@@ -4,17 +4,22 @@ from dataclasses import dataclass
 from datetime import date
 
 from .domain import Proposal
+from .sort_keys import time_sort_minutes
 
 
 RELATION_TYPE_KEY = "relation_type"
-RELATION_WORKFLOW_STEP = "workflow_step"
-RELATION_CHILD_TASK = "child_task"
-RELATION_PREP_SUBTASK = "prep_subtask"
+
+# Prep-subtask link marker. ``LINK_TYPE_KEY`` is a distinct axis from
+# ``RELATION_TYPE_KEY``: ``link_type == LINK_PREP_SUBTASK`` is the real prep
+# marker, whereas ``relation_type`` carries workflow-graph relation semantics.
+LINK_TYPE_KEY = "link_type"
+LINK_PREP_SUBTASK = "prep_subtask"
 
 WORKFLOW_ID_KEY = "workflow_id"
 WORKFLOW_TITLE_KEY = "workflow_title"
 WORKFLOW_ROLE_KEY = "workflow_role"
 WORKFLOW_PARENT_ROLE = "parent"
+WORKFLOW_CONTAINER_KEY = "workflow_container"
 WORKFLOW_GROUP_ID_KEY = "workflow_group_id"
 WORKFLOW_GROUP_REQUEST_ID_KEY = "workflow_group_request_id"
 WORKFLOW_GROUP_CHILD_IDS_KEY = "workflow_group_child_ids"
@@ -27,6 +32,60 @@ DEPENDS_ON_PROPOSAL_ID_KEY = "depends_on_proposal_id"
 DEPENDS_ON_SOURCE_KEYS_KEY = "depends_on_source_keys"
 STEP_INDEX_KEY = "step_index"
 STEP_COUNT_KEY = "step_count"
+
+# Deferral metadata (semantic agent -> deterministic core).
+DEFERRED_UNTIL_KEY = "deferred_until"
+DEFERRED_MISSING_SLOTS_KEY = "deferred_missing_slots"
+DEFERRED_REASON_KEY = "deferred_reason"
+DEFERRED_REMINDER_CADENCE_HOURS_KEY = "deferred_reminder_cadence_hours"
+
+# Progress metadata.
+PROGRESS_STATUS_KEY = "progress_status"
+PROGRESS_NOTE_KEY = "progress_note"
+PROGRESS_PERCENT_KEY = "progress_percent"
+REMAINING_WORK_KEY = "remaining_work"
+PROGRESS_UPDATED_AT_KEY = "progress_updated_at"
+COMPLETED_AT_KEY = "completed_at"
+
+# Merge / dedupe metadata.
+MERGED_INTO_PROPOSAL_ID_KEY = "merged_into_proposal_id"
+
+# Date-window metadata.
+DATE_WINDOW_START_KEY = "date_window_start"
+DATE_WINDOW_END_KEY = "date_window_end"
+DATE_WINDOW_LABEL_KEY = "date_window_label"
+DATE_WINDOW_KIND_KEY = "date_window_kind"
+
+# Participant / location metadata.
+PARTICIPANTS_KEY = "participants"
+EXTERNAL_PARTICIPANTS_KEY = "external_participants"
+PARTICIPANT_LABEL_KEY = "participant_label"
+ATTENDEES_KEY = "attendees"
+LOCATION_KEY = "location"
+LOCATION_OPTIONAL_KEY = "location_optional"
+
+# Conflict metadata.
+CONFLICT_DETECTED_KEY = "conflict_detected"
+CONFLICT_WITH_PROPOSAL_IDS_KEY = "conflict_with_proposal_ids"
+
+# Intake gating metadata (safety-relevant).
+INTAKE_POLICY_KEY = "intake_policy"
+
+# Source provenance metadata.
+SOURCE_PROVIDER_KEY = "source_provider"
+SOURCE_CHANNEL_KEY = "source_channel"
+SOURCE_TS_KEY = "source_ts"
+
+# Prep / timing flags.
+NEEDS_PREP_KEY = "needs_prep"
+NEEDS_EXACT_TIME_KEY = "needs_exact_time"
+
+# Last-semantic-patch provenance (semantic agent audit trail).
+LAST_SEMANTIC_PATCH_ACTOR_ID_KEY = "last_semantic_patch_actor_id"
+LAST_SEMANTIC_PATCH_AT_KEY = "last_semantic_patch_at"
+LAST_SEMANTIC_PATCH_CONFIDENCE_KEY = "last_semantic_patch_confidence"
+LAST_SEMANTIC_PATCH_EVIDENCE_KEY = "last_semantic_patch_evidence"
+LAST_STATE_LINKED_UPDATE_TYPE_KEY = "last_state_linked_update_type"
 
 REQUIRES_SEPARATE_APPROVAL_KEY = "requires_separate_approval"
 RISK_LEVEL_KEY = "risk_level"
@@ -163,18 +222,55 @@ def relation_sort_key(proposal: Proposal) -> tuple[int, int, str, int, str]:
         has_step,
         step_rank,
         proposal_date.isoformat() if proposal_date else "9999-12-31",
-        _time_sort_minutes(proposal.time_window),
+        time_sort_minutes(proposal.time_window),
         proposal.title,
     )
 
 
-def step_label(proposal: Proposal) -> str:
+def step_label(
+    proposal: Proposal,
+    proposals: list[Proposal] | tuple[Proposal, ...] | None = None,
+) -> str:
+    """Render the per-step N/M label.
+
+    When the full proposal set is supplied, the denominator and the index are
+    recomputed live from the current sibling set under the same workflow root so
+    a stale stored step_count (e.g. '2/2' after a third child attaches) never
+    surfaces.  Without the proposal set the stored step_index/step_count is used,
+    preserving the historical single-argument behaviour for callers that lack
+    sibling context.
+    """
+
+    live = _live_step_label(proposal, proposals) if proposals else ""
+    if live:
+        return live
     step_index = proposal.metadata.get(STEP_INDEX_KEY, "")
     step_count = proposal.metadata.get(STEP_COUNT_KEY, "")
     if step_index and step_count:
         return f"{step_index}/{step_count}"
     if step_index:
         return f"{step_index}단계"
+    return ""
+
+
+def _live_step_label(
+    proposal: Proposal,
+    proposals: list[Proposal] | tuple[Proposal, ...],
+) -> str:
+    parent_id = parent_proposal_id(proposal)
+    if not parent_id:
+        return ""
+    siblings = [
+        item
+        for item in proposals
+        if parent_proposal_id(item) == parent_id and item.proposal_id != parent_id
+    ]
+    if len(siblings) < 2:
+        return ""
+    ordered = order_child_proposals(siblings)
+    for index, sibling in enumerate(ordered, start=1):
+        if sibling.proposal_id == proposal.proposal_id:
+            return f"{index}/{len(ordered)}"
     return ""
 
 
@@ -247,7 +343,36 @@ def validate_workflow_relations(
                 )
             else:
                 seen[step] = child.proposal_id
+
+    for proposal in proposals:
+        cycle_proposal_id = _parent_cycle_node(proposal, by_id)
+        if cycle_proposal_id:
+            errors.append(
+                RelationValidationError(
+                    code="relation_cycle",
+                    proposal_id=proposal.proposal_id,
+                    detail=cycle_proposal_id,
+                )
+            )
     return tuple(errors)
+
+
+def _parent_cycle_node(proposal: Proposal, by_id: dict[str, Proposal]) -> str:
+    """Return the proposal id where a parent_proposal_id walk revisits a node, else ''."""
+
+    visited: set[str] = set()
+    current: Proposal | None = proposal
+    while current is not None:
+        if current.proposal_id in visited:
+            return current.proposal_id
+        visited.add(current.proposal_id)
+        parent_id = parent_proposal_id(current)
+        if not parent_id:
+            return ""
+        if parent_id == current.proposal_id:
+            return current.proposal_id
+        current = by_id.get(parent_id)
+    return ""
 
 
 def resolve_same_batch_relation_metadata(proposals: tuple[Proposal, ...]) -> tuple[Proposal, ...]:
@@ -355,22 +480,6 @@ def _deadline_sort_key(proposal: Proposal) -> tuple[str, int, str]:
     proposal_date: date | None = proposal.scheduled_date or proposal.due_date
     return (
         proposal_date.isoformat() if proposal_date else "9999-12-31",
-        _time_sort_minutes(proposal.time_window),
+        time_sort_minutes(proposal.time_window),
         proposal.title,
     )
-
-
-def _time_sort_minutes(value: str) -> int:
-    if not value:
-        return 24 * 60 + 1
-    compact = value.lower().replace(" ", "")
-    if compact.startswith("오전"):
-        return 9 * 60
-    if compact.startswith("오후"):
-        return 13 * 60
-    if compact in {"퇴근전", "퇴근전까지"}:
-        return 18 * 60
-    hour = compact.split(":", 1)[0]
-    if hour.isdigit():
-        return int(hour) * 60
-    return 24 * 60
