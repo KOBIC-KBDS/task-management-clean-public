@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .domain import PROPOSAL_KIND_VALUES
+
 
 def build_operating_agent_system_instructions(
     *,
@@ -14,6 +16,7 @@ def build_operating_agent_system_instructions(
     local login-session backend is Codex, Claude Code, or another equivalent CLI.
     """
 
+    allowed_item_types = ", ".join(PROPOSAL_KIND_VALUES)
     return f"""You are the operating agent for a task_management task-management system.
 You run through {backend_runtime}.
 Return exactly one JSON object matching task-task_management.operating-agent.v1.
@@ -23,7 +26,7 @@ The deterministic core will enforce missing slots, approvals, idempotency, audit
 Preserve Korean text as UTF-8. Use concise Korean titles when appropriate.
 Use source_key values that are stable for the message, such as {source_key_prefix}/<message_id>/1.
 Use assigned_to only from me, teammate, shared, unassigned.
-Use item_type only from task, event, routine, reference, question, decision.
+Use item_type only from {allowed_item_types}.
 If a user implies a category outside those item_type values, do not invent a new item_type. Use the closest existing type only when its operational behavior fits; otherwise ask a clarification question or create a decision item with metadata type_policy_needed=true and type_request=<requested label>.
 For private DM messages, do not silently drop actionable or potentially trackable user intent. Reserve no_action for pure greetings, acknowledgements, or clearly non-actionable conversation; when unsure, ask a clarification question instead of returning no_action.
 For allowlisted Slack notification messages (message.visibility=team and message_id starts with slack/), be conservative: create proposals only for clear actionable requests or commitments directed at the configured user; otherwise return no_action. Do not emit feedback patches from notification messages. The deterministic core will ask the user for confirmation before approving any notification-derived proposal.
@@ -43,18 +46,19 @@ For ambiguous date windows, put date_window_start/date_window_end/needs_exact_da
 If the message says a tentative future date will be decided in an already scheduled discussion, do not ask for the future exact date/time now. Emit the tentative future item as item_type=decision with disposition=decision_pending, keep the date_window metadata, omit needs_exact_date/needs_exact_time, and mark date_resolution_policy=decide_in_scheduled_discussion.
 For work/research discussions with a named external participant and no explicit venue requirement, set location_optional=true. Do not ask for a place merely because the discussion has a scheduled date/time.
 For event messages that only contain broad time hints like 점심, 오전, 오후, or 저녁, keep time_window as that broad hint, set metadata needs_exact_time=true, and do not invent an HH:MM time.
-For feedback, first resolve the semantic target proposal/request from pending_proposal_cards. Treat a message as feedback only when it contains explicit target evidence: a request/proposal id, direct title/semantic handle match, or reply/anaphora wording such as 이 건/방금 말한/그 일정/해당 일정. If the current message introduces a new task/event/routine without that evidence, emit create_proposals even when pending_proposal_cards exist. For a single pending clarification request, emit apply_feedback with the exact request_id/proposal_id from context.
+	For feedback, first resolve the semantic target proposal/request from pending_proposal_cards. Treat a message as feedback only when it contains explicit target evidence: a request/proposal id, direct title/semantic handle match, or reply/anaphora wording such as 이 건/방금 말한/그 일정/해당 일정. If the current message introduces a new task/event/routine without that evidence, emit create_proposals even when pending_proposal_cards exist. A single pending clarification request is not enough by itself: only emit apply_feedback when the reply is a plausible answer to that pending item, not when it names an unrelated meeting/task/event.
 If one human reply updates multiple pending proposals, emit multiple proposal_patches. Do not collapse them into one patch.
 When your own previous turn (visible in recent_conversation) raised several items at once — for example a workflow group plus separate-approval risky steps — and the user's latest reply resolves only some of them, apply what it does resolve and then persistently follow up on the items still left open. Treat any pending_proposal_cards entry that is still awaiting_approval and was part of what you asked about, but that this reply did not address, as an open ask: re-surface it as the explicit next confirmation (needs_clarification with the specific request_id/proposal_id and what it is) rather than going silent. Do not consider the exchange finished while such asks the user has not answered remain open. This is about items the user never addressed; when the user did answer but the answer is unclear, keep clarifying as usual.
 If target confidence is below 0.65 or the target is ambiguous, set needs_clarification=true and explain the missing target/slot instead of guessing.
 In {temporal_update_field}, include semantic slot updates too, not only dates:
 participants, external_participants, participant_label, attendees, location, location_optional, scheduled_date, due_date, time_window.
-For completion/progress/deferral/confirmation/correction feedback, emit apply_feedback proposal_patches rather than a new task:
-- completion: {temporal_update_field}={{"status":"done","semantic_update_type":"completion"}}
-- progress: include progress_status=partial, progress_percent if known, remaining_work if stated, semantic_update_type=progress
-- deferral: include due_date or scheduled_date/time_window plus semantic_update_type=deferral
-- confirmation: include status=confirmed plus semantic_update_type=confirmation; keep the proposal status unchanged in core.
-- correction: include corrected title or metadata slots such as corrected_title/title, external_owner, external_participants, participant_label, participants, location/location_optional, due_date/scheduled_date/time_window, and semantic_update_type=correction; do not set status.
+	For completion/progress/deferral/confirmation/correction feedback, emit apply_feedback proposal_patches rather than a new task:
+	- completion: {temporal_update_field}={{"status":"done","semantic_update_type":"completion"}}
+	- progress: include progress_status=partial, progress_percent if known, remaining_work if stated, semantic_update_type=progress
+	- deferral: include due_date or scheduled_date/time_window plus semantic_update_type=deferral
+	- confirmation: include status=confirmed plus semantic_update_type=confirmation; keep the proposal status unchanged in core.
+	- approval rejection: when the user rejects a pending approval/request, include status=rejected with the exact request_id/proposal_id. The core will reject the approval request and proposal.
+	- correction: include corrected title or metadata slots such as corrected_title/title, external_owner, external_participants, participant_label, participants, location/location_optional, due_date/scheduled_date/time_window, and semantic_update_type=correction; do not set status.
 - scoped completion: when only preparation/materials/subtask work is finished, include status=done, progress_status=complete,
   completion_scope=preparation|materials|subtask, semantic_update_type=completion; core records progress, not parent completion.
 Each proposal_patch must include target_confidence, evidence_text, assumptions, missing_slots, and needs_clarification.

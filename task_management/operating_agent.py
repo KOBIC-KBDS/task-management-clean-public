@@ -1,7 +1,20 @@
 from __future__ import annotations
 
+from .relations import (
+    ATTENDEES_KEY,
+    DATE_WINDOW_START_KEY,
+    EXTERNAL_PARTICIPANTS_KEY,
+    LOCATION_KEY,
+    LOCATION_OPTIONAL_KEY,
+    PARTICIPANTS_KEY,
+    PARTICIPANT_LABEL_KEY,
+    PROGRESS_PERCENT_KEY,
+    PROGRESS_STATUS_KEY,
+    REMAINING_WORK_KEY,
+)
+
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 import re
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
@@ -14,6 +27,7 @@ from .domain import (
     IncomingMessage,
     Proposal,
 )
+from .feedback_scoring import MIN_RUNNER_UP_GAP, MIN_TARGET_SCORE, pick_best_candidate
 
 
 OPERATING_AGENT_SCHEMA = "task-task_management.operating-agent.v1"
@@ -324,16 +338,16 @@ class RuleBasedTeamTaskOperatingAgent:
         {
             "due_date",
             "scheduled_date",
-            "date_window_start",
+            DATE_WINDOW_START_KEY,
             "time_window",
-            "participants",
-            "location",
-            "location_optional",
+            PARTICIPANTS_KEY,
+            LOCATION_KEY,
+            LOCATION_OPTIONAL_KEY,
             "defer_missing_slots",
             "materials",
             "status",
-            "progress_status",
-            "remaining_work",
+            PROGRESS_STATUS_KEY,
+            REMAINING_WORK_KEY,
             "semantic_update_type",
         }
     )
@@ -434,14 +448,14 @@ class RuleBasedTeamTaskOperatingAgent:
         elif _has_progress_signal(message.text):
             update_type = "progress"
             temporal_update = {
-                "progress_status": "partial",
+                PROGRESS_STATUS_KEY: "partial",
                 "semantic_update_type": update_type,
             }
             remaining = _remaining_work_from_progress_text(message.text)
             if _looks_half_done(message.text):
-                temporal_update["progress_percent"] = "50"
+                temporal_update[PROGRESS_PERCENT_KEY] = "50"
             if remaining:
-                temporal_update["remaining_work"] = remaining
+                temporal_update[REMAINING_WORK_KEY] = remaining
         elif _has_deferral_signal(message.text) and not _looks_like_missing_info_deferral(message.text):
             parsed = parse_temporal_update(message.text, reference_date=message.received_at.date())
             if not any(parsed.get(key) for key in ("due_date", "scheduled_date", "time_window")):
@@ -529,16 +543,7 @@ def _resolve_feedback_target(candidates: tuple[Proposal, ...], text: str) -> Pro
         for score in (_feedback_score(proposal, text),)
         if score > 0
     ]
-    if not scored:
-        return None
-    scored.sort(key=lambda item: (item[0], item[1].updated_at or item[1].created_at or datetime.min), reverse=True)
-    best_score, best = scored[0]
-    runner_up = scored[1][0] if len(scored) > 1 else 0
-    if best_score < 8:
-        return None
-    if runner_up and best_score - runner_up < 3:
-        return None
-    return best
+    return pick_best_candidate(scored, min_score=MIN_TARGET_SCORE, min_gap=MIN_RUNNER_UP_GAP)
 
 
 def _has_target_evidence(candidates: tuple[Proposal, ...], text: str) -> bool:
@@ -566,9 +571,9 @@ def _target_semantic_tokens(proposal: Proposal) -> set[str]:
         for item in (
             proposal.title,
             proposal.raw_text,
-            proposal.metadata.get("participants", ""),
-            proposal.metadata.get("external_participants", ""),
-            proposal.metadata.get("participant_label", ""),
+            proposal.metadata.get(PARTICIPANTS_KEY, ""),
+            proposal.metadata.get(EXTERNAL_PARTICIPANTS_KEY, ""),
+            proposal.metadata.get(PARTICIPANT_LABEL_KEY, ""),
             proposal.metadata.get("materials", ""),
         )
         if item
@@ -735,20 +740,20 @@ def _normalize_draft_metadata(metadata: dict[str, str], *, raw_text: str, title:
     "swap only the brain" contract.
     """
     normalized = dict(metadata)
-    attendees = normalized.get("attendees", "")
-    if attendees and not normalized.get("external_participants"):
-        normalized["external_participants"] = attendees
-    if attendees and not normalized.get("participant_label"):
-        normalized["participant_label"] = attendees
+    attendees = normalized.get(ATTENDEES_KEY, "")
+    if attendees and not normalized.get(EXTERNAL_PARTICIPANTS_KEY):
+        normalized[EXTERNAL_PARTICIPANTS_KEY] = attendees
+    if attendees and not normalized.get(PARTICIPANT_LABEL_KEY):
+        normalized[PARTICIPANT_LABEL_KEY] = attendees
     text = f"{raw_text} {title} {attendees}"
-    if not normalized.get("participants") and ("나" in text or "me" in text):
-        normalized["participants"] = "me"
+    if not normalized.get(PARTICIPANTS_KEY) and ("나" in text or "me" in text):
+        normalized[PARTICIPANTS_KEY] = "me"
     if (
-        not normalized.get("location")
-        and normalized.get("location_optional") != "true"
+        not normalized.get(LOCATION_KEY)
+        and normalized.get(LOCATION_OPTIONAL_KEY) != "true"
         and any(token in text for token in _LOCATION_OPTIONAL_TOKENS)
     ):
-        normalized["location_optional"] = "true"
+        normalized[LOCATION_OPTIONAL_KEY] = "true"
     return normalized
 
 

@@ -33,6 +33,8 @@ def _clear_local_loader_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_chat_command_parser_supports_korean_reply_commands() -> None:
     accepted = parse_chat_command("수락 approval/abc123")
     rejected = parse_chat_command("거절 approval/abc123")
+    rejected_code = parse_chat_command("`거절 approval/abc123`")
+    rejected_bold = parse_chat_command("*거절 approval/abc123*")
     changed = parse_chat_command("변경 approval/abc123 다음주 수요일 오후")
     completed = parse_chat_command("완료 task_management/abc123")
     assigned = parse_chat_command("담당 task_management/abc123 팀원")
@@ -42,6 +44,10 @@ def test_chat_command_parser_supports_korean_reply_commands() -> None:
     assert accepted.target_id == "approval/abc123"
     assert rejected is not None
     assert rejected.action == "reject"
+    assert rejected_code is not None
+    assert rejected_code.action == "reject"
+    assert rejected_bold is not None
+    assert rejected_bold.action == "reject"
     assert changed is not None
     assert changed.action == "change"
     assert changed.body == "다음주 수요일 오후"
@@ -641,19 +647,21 @@ def test_chat_adapter_dispatch_keeps_future_kakao_wrapper_thin(tmp_path: Path) -
     dispatch_outbound(adapter, result.outbound_messages)
 
     assert adapter.personal == [("teammate", result.outbound_messages[0].text)]
-    assert adapter.team == []
 
 
+# Realigned for Phase D channel-extensibility: ChatAdapter was a dead
+# forward-looking protocol whose send_personal -> None / send_team shape the real
+# SlackDmAdapter never satisfied.  It is now an alias of the single surviving
+# outbound transport protocol, LiveChatTransport (poll_messages + send_personal
+# -> str), so RecordingAdapter matches that shape: send_personal returns a
+# provider message id and there is no send_team.
 class RecordingAdapter:
     def __init__(self) -> None:
         self.personal: list[tuple[str, str]] = []
-        self.team: list[str] = []
 
-    def poll_messages(self):
+    def poll_messages(self) -> tuple:
         return ()
 
-    def send_personal(self, actor_id: str, text: str) -> None:
+    def send_personal(self, actor_id: str, text: str) -> str:
         self.personal.append((actor_id, text))
-
-    def send_team(self, text: str) -> None:
-        self.team.append(text)
+        return f"recorded/{len(self.personal)}"

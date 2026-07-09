@@ -19,6 +19,7 @@ Rules/keyword parsing is a fallback and test aid, not the product core.
 
 Start with [`docs/agent-flow.md`](docs/agent-flow.md) to understand how the semantic agent, deterministic policy, workflow normalizer, backfill path, and human-facing surfaces work together.
 A rendered preview is available at [`docs/agent-flow.html`](docs/agent-flow.html), and the older standalone interactive runtime-flow demo remains at [`docs/agent-flow-demo/index.html`](docs/agent-flow-demo/index.html).
+For cross-agent refactoring handoffs, read and update [`docs/shared-context.md`](docs/shared-context.md) before and after meaningful changes.
 
 ## Deployment model
 

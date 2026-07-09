@@ -10,7 +10,9 @@ from .human_view import (
     render_confirmed_sentence,
     render_missing_slot_sentence,
 )
+from .sort_keys import schedule_first_sort_key
 from .store import TeamTaskStore
+from .work_item_state import is_personal_scope, is_surface_visible_item, schedule_first_date
 
 
 def build_today_update_digest(
@@ -25,7 +27,11 @@ def build_today_update_digest(
     """Render a concise Slack DM digest for the current personal task cycle."""
 
     today = now.date()
-    proposals = [proposal for proposal in store.list_proposals() if _is_personal_scope(proposal, actor_id)]
+    proposals = [
+        proposal
+        for proposal in store.list_proposals()
+        if _is_personal_scope(proposal, actor_id) and is_surface_visible_item(proposal)
+    ]
     touched = [proposal for proposal in proposals if _is_touched_today(proposal, today)]
     confirmed = [
         proposal
@@ -122,29 +128,6 @@ def _is_touched_today(proposal: Proposal, today: date) -> bool:
     ) or _proposal_date(proposal) == today
 
 
-def _proposal_date(proposal: Proposal) -> date | None:
-    return proposal.scheduled_date or proposal.due_date
-
-
-def _sort_key(proposal: Proposal) -> tuple[str, str, str]:
-    proposal_date = _proposal_date(proposal)
-    return (
-        proposal_date.isoformat() if proposal_date else "9999-12-31",
-        proposal.time_window,
-        proposal.title,
-    )
-
-
-def _is_personal_scope(proposal: Proposal, actor_id: str) -> bool:
-    actor_values = {
-        proposal.assigned_to,
-        proposal.proposer_id,
-        *proposal.required_approvers,
-        *proposal.approvals,
-    }
-    participants = proposal.metadata.get("participants", "")
-    return (
-        actor_id in actor_values
-        or proposal.assigned_to in {"shared", "unassigned"}
-        or actor_id in {item.strip() for item in participants.split(",")}
-    )
+_proposal_date = schedule_first_date
+_sort_key = schedule_first_sort_key
+_is_personal_scope = is_personal_scope

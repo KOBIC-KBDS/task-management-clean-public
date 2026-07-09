@@ -126,6 +126,44 @@ def test_slack_monthly_task_page_renders_personal_checklist_sections(tmp_path) -
     assert "https://example.com/babyfair" in markdown
 
 
+def test_slack_monthly_page_orders_same_day_items_by_clock_minutes(tmp_path) -> None:
+    # Regression: the personal surfaces (secretary/monthly-page/digest) used to
+    # sort same-day items by the RAW time_window string, so '오후 10시' (22:00)
+    # sorted before '오후 2시' (14:00) lexicographically. They now share
+    # sort_keys.schedule_first_sort_key, which tie-breaks on real clock minutes.
+    store = _store(tmp_path)
+    afternoon_late = _proposal("proposal/late", "늦은 오후 회의", time_window="오후 10시")
+    afternoon_early = _proposal("proposal/early", "이른 오후 회의", time_window="오후 2시")
+    morning = _proposal("proposal/morning", "오전 회의", time_window="오전 9시")
+    for proposal in (afternoon_late, afternoon_early, morning):
+        store.save_proposal(proposal)
+
+    model = build_slack_monthly_task_page_model(store, actor_id="me", month=date(2026, 5, 1))
+    markdown = render_slack_monthly_task_page_markdown(model)
+
+    # Chronological order: 오전 9시 < 오후 2시 < 오후 10시.
+    assert markdown.index("오전 회의") < markdown.index("이른 오후 회의") < markdown.index("늦은 오후 회의")
+    # And the same in the structured model that drives every personal surface.
+    assert [item.proposal_id for item in model.approved] == [
+        "proposal/morning",
+        "proposal/early",
+        "proposal/late",
+    ]
+
+
+def test_slack_monthly_page_excludes_rejected_scheduled_items(tmp_path) -> None:
+    store = _store(tmp_path)
+    store.save_proposal(_proposal("proposal/approved", "확정된 오후 회의"))
+    store.save_proposal(_proposal("proposal/rejected", "거절한 오후 회의", status="rejected"))
+
+    model = build_slack_monthly_task_page_model(store, actor_id="me", month=date(2026, 5, 1))
+    markdown = render_slack_monthly_task_page_markdown(model)
+
+    assert [item.proposal_id for item in model.approved] == ["proposal/approved"]
+    assert "확정된 오후 회의" in markdown
+    assert "거절한 오후 회의" not in markdown
+
+
 def test_render_slack_monthly_page_cli_writes_markdown(tmp_path) -> None:
     state = tmp_path / "state"
     store = TeamTaskStore(state / "task_management.sqlite3", state / "events.jsonl")

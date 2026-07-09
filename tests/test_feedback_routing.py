@@ -103,17 +103,6 @@ class CreateAndPatchAgent:
         )
 
 
-class FailIfCalledAgent:
-    def decide(
-        self,
-        message: IncomingMessage,
-        *,
-        pending_approval_requests: Sequence[ApprovalRequest],
-        pending_proposals: Sequence[Proposal],
-    ) -> OperatingAgentDecision:
-        raise AssertionError("explicit pending feedback should be handled before agent extraction")
-
-
 class NoActionSourceAgent:
     def __init__(self, source: str) -> None:
         self.source = source
@@ -132,6 +121,44 @@ class NoActionSourceAgent:
             source=self.source,
             confidence=0.99,
             rationale="Test no_action source for semantic-first fallback policy.",
+        )
+
+
+class MisroutedSinglePendingPatchAgent:
+    def __init__(self, request_id: str, proposal_id: str) -> None:
+        self.request_id = request_id
+        self.proposal_id = proposal_id
+        self.calls = 0
+
+    def decide(
+        self,
+        message: IncomingMessage,
+        *,
+        pending_approval_requests: Sequence[ApprovalRequest],
+        pending_proposals: Sequence[Proposal],
+    ) -> OperatingAgentDecision:
+        self.calls += 1
+        return OperatingAgentDecision(
+            action="apply_feedback",
+            source="codex_cli",
+            confidence=0.88,
+            rationale="Regression fixture: semantic layer tried to resolve unrelated new meeting against the lone pending card.",
+            proposal_patches=(
+                ProposalPatch(
+                    request_id=self.request_id,
+                    proposal_id=self.proposal_id,
+                    actor_id=message.sender_id,
+                    body=message.text,
+                    temporal_update={
+                        "time_window": "13:30",
+                        "location": "회의실",
+                        "semantic_update_type": "correction",
+                    },
+                    reason="resolve_pending_question_partial_slots",
+                    target_confidence=0.78,
+                    evidence_text=message.text,
+                ),
+            ),
         )
 
 
@@ -499,7 +526,47 @@ def test_action_word_overlap_does_not_hijack_single_pending_question(tmp_path: P
     assert terms.metadata.get("last_resolution_update_message_id", "") == ""
 
 
-@pytest.mark.parametrize("source", ["codex_cli", "openai_responses", "claude_code_cli"])
+def test_semantic_single_pending_mismatch_falls_back_to_new_meeting_creation(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    s8 = _pending(
+        "검색 페이지 방향 아이디어 요청",
+        "proposal/search-page",
+        "approval/search-page",
+        missing_slots=("date",),
+    )
+    _save_pending(store, s8, "approval/search-page")
+    agent = MisroutedSinglePendingPatchAgent("approval/search-page", "proposal/search-page")
+
+    result = TeamTaskOrchestrator(store, operating_agent=agent).handle_message(
+        _message("1시 반에 회의실에서 외부 연락 후속 회의", ts="1000.000012")
+    )
+
+    assert agent.calls == 1
+    unchanged = store.get_proposal("proposal/search-page")
+    unchanged_request = store.get_approval_request("approval/search-page")
+    assert unchanged is not None
+    assert unchanged.status == "awaiting_approval"
+    assert unchanged.time_window == ""
+    assert unchanged.metadata.get("location", "") == ""
+    assert unchanged_request is not None
+    assert unchanged_request.status == "pending"
+
+    created = [proposal for proposal in result.proposals if proposal.proposal_id != "proposal/search-page"]
+    assert len(created) == 1
+    meeting = created[0]
+    assert meeting.kind == "event"
+    assert meeting.status == "approved"
+    assert meeting.scheduled_date == date(2026, 5, 19)
+    assert meeting.time_window == "13:30"
+    assert meeting.metadata["location"] == "회의실"
+    assert meeting.metadata["participants"] == "me"
+    event_types = [event["type"] for event in store.read_events()]
+    assert "agent.patch.rejected" in event_types
+    assert "agent.feedback_reinterpreted_as_new_work" in event_types
+    assert "proposal.created" in event_types
+
+
+@pytest.mark.parametrize("source", ["codex_cli", "claude_code_cli", "openai_responses"])
 def test_trusted_semantic_no_action_prevents_state_linked_fallback(tmp_path: Path, source: str) -> None:
     store = _store(tmp_path)
     _save_pending(
@@ -655,3 +722,56 @@ def test_deictic_kickoff_feedback_still_updates_pending_question(tmp_path: Path)
     assert updated.scheduled_date == date(2026, 5, 26)
     assert updated.time_window == "15:00"
     assert updated.status == "approved"
+
+
+def test_other_actor_filling_slot_does_not_consume_required_approver_request(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    proposal = Proposal(
+        proposal_id="proposal/terms",
+        source_message_id="slack/DTEST/source-terms",
+        proposer_id="teammate",
+        title="약관 2차 수정안 검토 및 교육페이지 약관 추가",
+        raw_text="약관 2차 수정안 검토 및 교육페이지 약관 추가",
+        kind="question",
+        status="awaiting_approval",
+        assigned_to="teammate",
+        task_management_area="work",
+        discussion_id="private/DTEST/source-terms",
+        message_id="slack/DTEST/source-terms/1",
+        required_approvers=("teammate",),
+        missing_slots=("exact_date",),
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={
+            "participants": "teammate",
+            "materials": "통합이용약관, 통합포털 개인정보처리방침, scDB 약관, 교육페이지 이용약관",
+            "needs_exact_date": "true",
+        },
+    )
+    store.save_proposal(proposal)
+    store.save_approval_request(
+        ApprovalRequest(
+            request_id="approval/terms",
+            proposal_id="proposal/terms",
+            approver_id="teammate",
+            requested_at=NOW,
+        )
+    )
+    agent = NoActionSourceAgent("rule_based")
+
+    # Actor 'me' (not the required approver) fills the missing slot via the fallback reconciler.
+    TeamTaskOrchestrator(store, operating_agent=agent).handle_message(
+        _message("약관은 금요일 퇴근전까지 검토하면 돼", ts="1000.000011")
+    )
+
+    assert agent.calls == 1
+    # The required approver's pending request must NOT be consumed by another actor.
+    teammate_request = store.get_approval_request("approval/terms")
+    assert teammate_request is not None
+    assert teammate_request.status == "pending"
+    # The proposal must not be wrongly approved: the required approver still has to decide.
+    terms = store.get_proposal("proposal/terms")
+    assert terms is not None
+    assert terms.status == "awaiting_approval"
+    assert "teammate" in terms.required_approvers
+    assert "teammate" not in terms.approvals

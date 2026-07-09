@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+from .relations import (
+    ATTENDEES_KEY,
+    DATE_WINDOW_END_KEY,
+    DATE_WINDOW_KIND_KEY,
+    DATE_WINDOW_LABEL_KEY,
+    DATE_WINDOW_START_KEY,
+    EXTERNAL_PARTICIPANTS_KEY,
+    LOCATION_KEY,
+    LOCATION_OPTIONAL_KEY,
+    NEEDS_EXACT_TIME_KEY,
+    NEEDS_PREP_KEY,
+    PARTICIPANTS_KEY,
+    PARTICIPANT_LABEL_KEY,
+)
+
 from datetime import date, timedelta
 import hashlib
 import re
 from typing import Iterable
 
 from .domain import TeamTaskMessage, TeamTaskTaskCandidate
+from .korean_time import CLOCK_RE, PM_MARKERS
 
 
 SPEAKER_RE = re.compile(r"^(?P<speaker>[^:：]{1,24})[:：]\s*(?P<text>.+)$")
@@ -188,16 +204,16 @@ def _segment_to_candidate(
         **_extract_feedback_metadata(segment, reference_date=reference_date),
     }
     if _is_blocking_away_context(segment):
-        metadata.setdefault("participants", "me")
+        metadata.setdefault(PARTICIPANTS_KEY, "me")
         metadata.setdefault("event_scope", "away")
         metadata.setdefault("blocks_in_person", "true")
-        metadata.setdefault("location_optional", "true")
+        metadata.setdefault(LOCATION_OPTIONAL_KEY, "true")
         if not time_window or (
-            date_window.get("date_window_kind") == "range" and time_window in {"lunch", "noon", "점심"}
+            date_window.get(DATE_WINDOW_KIND_KEY) == "range" and time_window in {"lunch", "noon", "점심"}
         ):
             time_window = "all_day"
-    if date_window.get("date_window_kind") == "range" and date_window.get("date_window_start"):
-        scheduled_date = date.fromisoformat(date_window["date_window_start"])
+    if date_window.get(DATE_WINDOW_KIND_KEY) == "range" and date_window.get(DATE_WINDOW_START_KEY):
+        scheduled_date = date.fromisoformat(date_window[DATE_WINDOW_START_KEY])
     title = _title_from_segment(segment)
     if not title:
         return None
@@ -206,10 +222,14 @@ def _segment_to_candidate(
     source_key = _source_key(message.message_id, segment_index, title)
     assigned_to = _infer_assignee(segment, speaker=message.speaker)
     if assigned_to == "unassigned":
-        assigned_to = _assignee_from_participants(metadata.get("participants", ""))
+        assigned_to = _assignee_from_participants(metadata.get(PARTICIPANTS_KEY, ""))
     item_type = _infer_item_type(segment, metadata=metadata, scheduled_date=scheduled_date)
+    if item_type == "event" and assigned_to in {"me", "teammate"} and not any(
+        metadata.get(key) for key in (PARTICIPANTS_KEY, EXTERNAL_PARTICIPANTS_KEY, PARTICIPANT_LABEL_KEY, ATTENDEES_KEY)
+    ):
+        metadata[PARTICIPANTS_KEY] = assigned_to
     if item_type == "event" and time_window in {"lunch", "noon", "점심"}:
-        metadata["needs_exact_time"] = "true"
+        metadata[NEEDS_EXACT_TIME_KEY] = "true"
     return TeamTaskTaskCandidate(
         source_key=source_key,
         raw_text=title,
@@ -276,6 +296,8 @@ def _infer_assignee(text: str, *, speaker: str) -> str:
         return _speaker_person(normalized_speaker)
     if _is_blocking_away_context(text):
         return _speaker_person(normalized_speaker)
+    if _is_event_context(text):
+        return _speaker_person(normalized_speaker)
     if "해줘" in text or "해주세요" in text or "사줘" in text or "잡아줘" in text:
         return _other_person(normalized_speaker)
     return "unassigned"
@@ -312,6 +334,8 @@ def _extract_dates(text: str, *, reference_date: date) -> tuple[date | None, dat
     time_window = _extract_time_window(text)
 
     if parsed_date is None:
+        if time_window and _is_event_context(text):
+            return None, reference_date, time_window
         return None, None, time_window
     if _is_event_context(text) or "오전" in text or "오후" in text or "저녁" in text:
         return None, parsed_date, time_window
@@ -319,14 +343,16 @@ def _extract_dates(text: str, *, reference_date: date) -> tuple[date | None, dat
 
 
 def _extract_time_window(text: str) -> str:
-    clock = re.search(r"(?:(오전|오후|저녁|밤)\s*)?(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분)?", text)
+    clock = CLOCK_RE.search(text)
     if clock:
         hour = int(clock.group(2))
-        minute = int(clock.group(3) or 0)
+        minute = 30 if "반" in clock.group(0) and clock.group(3) is None else int(clock.group(3) or 0)
         marker = clock.group(1) or ""
-        if marker in {"오후", "저녁", "밤"} and hour < 12:
+        if marker in PM_MARKERS and hour < 12:
             hour += 12
         if not marker and hour <= 7 and any(token in text for token in ("퇴근", "저녁", "밤")):
+            hour += 12
+        if not marker and hour <= 7 and _is_event_context(text):
             hour += 12
         if marker == "오전" and hour == 12:
             hour = 0
@@ -357,10 +383,10 @@ def _extract_date_window(text: str, *, reference_date: date) -> dict[str, str]:
             end += timedelta(days=7)
         is_choice_window = "중" in text and "하루" in text
         return {
-            "date_window_start": start.isoformat(),
-            "date_window_end": end.isoformat(),
-            "date_window_label": week_range.group(0),
-            "date_window_kind": "choice" if is_choice_window else "range",
+            DATE_WINDOW_START_KEY: start.isoformat(),
+            DATE_WINDOW_END_KEY: end.isoformat(),
+            DATE_WINDOW_LABEL_KEY: week_range.group(0),
+            DATE_WINDOW_KIND_KEY: "choice" if is_choice_window else "range",
             **({"needs_exact_date": "true"} if is_choice_window else {}),
         }
 
@@ -379,10 +405,10 @@ def _extract_date_window(text: str, *, reference_date: date) -> dict[str, str]:
             end += timedelta(days=7)
         is_choice_window = "중" in text and "하루" in text
         return {
-            "date_window_start": start.isoformat(),
-            "date_window_end": end.isoformat(),
-            "date_window_label": plain_day_range.group(0).strip(),
-            "date_window_kind": "choice" if is_choice_window else "range",
+            DATE_WINDOW_START_KEY: start.isoformat(),
+            DATE_WINDOW_END_KEY: end.isoformat(),
+            DATE_WINDOW_LABEL_KEY: plain_day_range.group(0).strip(),
+            DATE_WINDOW_KIND_KEY: "choice" if is_choice_window else "range",
             **({"needs_exact_date": "true"} if is_choice_window else {}),
         }
 
@@ -393,10 +419,10 @@ def _extract_date_window(text: str, *, reference_date: date) -> dict[str, str]:
         start = base_monday + timedelta(days=5)
         end = base_monday + timedelta(days=6)
         return {
-            "date_window_start": start.isoformat(),
-            "date_window_end": end.isoformat(),
-            "date_window_label": "주말",
-            "date_window_kind": "choice",
+            DATE_WINDOW_START_KEY: start.isoformat(),
+            DATE_WINDOW_END_KEY: end.isoformat(),
+            DATE_WINDOW_LABEL_KEY: "주말",
+            DATE_WINDOW_KIND_KEY: "choice",
             "needs_exact_date": "true",
         }
     return {}
@@ -437,6 +463,7 @@ def _title_from_segment(segment: str) -> str:
     title = re.sub(r"(이번\s*주|이번주|다음\s*주|다음주)\s*(안에|까지)", "", title)
     title = re.sub(r"(오늘|내일|모레|이번\s*주|이번주|다음\s*주|다음주)\s*[월화수목금토일]?(까지|으로|에)?", "", title)
     title = re.sub(r"\d{4}-\d{2}-\d{2}(까지|으로|에)?", "", title)
+    title = re.sub(r"(?:(?:오전|오후|저녁|밤)\s*)?\d{1,2}\s*시(?:\s*(?:\d{1,2}\s*분|반))?\s*(?:에|부터)?", "", title)
     title = title.replace("오전으로", "").replace("오후로", "").replace("저녁으로", "")
     title = re.sub(r"^(내가|제가|당신은|당신이|여보가|우리|같이)\s*", "", title)
     replacements = (
@@ -471,19 +498,19 @@ def _extract_feedback_metadata(text: str, *, reference_date: date) -> dict[str, 
     metadata: dict[str, str] = {}
     participants = _extract_participants(text)
     if participants:
-        metadata["participants"] = ",".join(participants)
+        metadata[PARTICIPANTS_KEY] = ",".join(participants)
     location = _extract_location(text)
     if location:
-        metadata["location"] = location
+        metadata[LOCATION_KEY] = location
     if "장소" in text and any(token in text for token in ("필요하지", "필요 없어", "필요없", "상관없")):
-        metadata["location_optional"] = "true"
+        metadata[LOCATION_OPTIONAL_KEY] = "true"
     deferred_slots = _extract_deferred_slots(text)
     if deferred_slots:
         metadata["defer_missing_slots"] = ",".join(deferred_slots)
     materials = _extract_materials(text)
     if materials:
         metadata["materials"] = materials
-        metadata["needs_prep"] = "true"
+        metadata[NEEDS_PREP_KEY] = "true"
     return metadata
 
 
@@ -535,8 +562,16 @@ def _extract_location(text: str) -> str:
         location = explicit.group(1).strip(" ,.")
         if location and not any(token in location for token in ("필요하지", "필요 없어", "필요없", "상관없")):
             return location
+    after_clock_place = re.search(
+        r"(?:(?:오전|오후|저녁|밤)\s*)?\d{1,2}\s*시(?:\s*(?:\d{1,2}\s*분|반))?\s*(?:에|부터)?\s*([^,.。\n]{1,30}?)(?:에서|에)\s*",
+        text,
+    )
+    if after_clock_place:
+        location = after_clock_place.group(1).strip(" ,.")
+        if location and not _looks_like_time_suffix(location):
+            return location
     after_clock = re.search(
-        r"(?:(?:오전|오후|저녁|밤)\s*)?\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?\s*([^,.。\n]+)",
+        r"(?:(?:오전|오후|저녁|밤)\s*)?\d{1,2}\s*시(?:\s*(?:\d{1,2}\s*분|반))?\s*([^,.。\n]+)",
         text,
     )
     if after_clock:
@@ -617,7 +652,7 @@ def _extract_deferred_slots(text: str) -> tuple[str, ...]:
     if any(token in text for token in ("시간", "시간대", "몇 시", "몇시")):
         slots.append("time")
     if "장소" in text and not any(token in text for token in ("필요하지", "필요 없어", "필요없", "상관없")):
-        slots.append("location")
+        slots.append(LOCATION_KEY)
     if any(token in text for token in ("날짜", "일자", "일시", "언제")):
         slots.append("date")
     return tuple(dict.fromkeys(slots))

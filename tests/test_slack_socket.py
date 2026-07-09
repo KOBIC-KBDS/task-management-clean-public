@@ -8,11 +8,21 @@ from pathlib import Path
 import pytest
 
 from task_management.cli import main
+from task_management.domain import OutboundMessage
 from task_management.orchestrator import TeamTaskOrchestrator
-from task_management.slack_adapter import FakeSlackWebClient, SlackDmAdapter, SlackDmConfig
+from task_management.slack_adapter import (
+    MAX_OUTBOUND_SEND_ATTEMPTS,
+    FakeSlackWebClient,
+    SlackDmAdapter,
+    SlackDmConfig,
+    drain_slack_outbound_queue,
+    queue_slack_outbound,
+)
 from task_management.slack_socket import (
+    MAX_INBOUND_PROCESS_ATTEMPTS,
     FakeSlackSocketClient,
     SlackSocketConfig,
+    _reconnect_delay_seconds,
     diagnose_slack_socket_config,
     enqueue_slack_socket_envelope,
     handle_slack_socket_envelope,
@@ -568,3 +578,405 @@ def test_slack_socket_loop_cli_processes_local_transcript(
     assert payload["fake_acks"] == [{"envelope_id": "env-1"}]
     assert payload["fake_sent"][0][0] == "DTEST"
     assert "보고서 확인" in dashboard.read_text(encoding="utf-8")
+
+
+# --- BUG A2 (#4): failed outbound sends are retried until a terminal cap ---
+
+
+class _SendOnceFailsThenSucceedsClient(FakeSlackWebClient):
+    def __init__(self, *, fail_times: int, channel_id: str = "DTEST") -> None:
+        super().__init__(channel_id=channel_id)
+        self._fail_times = fail_times
+        self.attempts = 0
+
+    def send_message(self, channel_id: str, text: str) -> str:
+        self.attempts += 1
+        if self.attempts <= self._fail_times:
+            from task_management.slack_adapter import SlackAdapterError
+
+            raise SlackAdapterError("transient Slack failure")
+        return super().send_message(channel_id, text)
+
+
+def _approval_outbound(message_type: str = "approval_request") -> OutboundMessage:
+    return OutboundMessage(
+        surface="personal_chat",
+        recipient_id="me",
+        message_type=message_type,
+        text="확인이 필요합니다",
+        approval_request_id="approval/abc123",
+    )
+
+
+def test_outbound_send_failure_is_retried_until_terminal_cap(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    config = SlackDmConfig(actor_id="me", dm_channel_id="DTEST")
+    client = _SendOnceFailsThenSucceedsClient(fail_times=1)
+    adapter = SlackDmAdapter(config, client)
+    message = _approval_outbound()
+    now = datetime(2026, 5, 5, 10, 0, 0)
+
+    queue_slack_outbound(store, adapter, (message,), queued_at=now)
+    pending = store.list_pending_outbound_messages(provider="slack")
+    assert len(pending) == 1
+    dedupe_key = pending[0]["dedupe_key"]
+
+    # First drain fails the send but leaves the row retryable (status='pending').
+    sent_first = drain_slack_outbound_queue(store, adapter, sent_at=now, raise_on_error=False)
+    assert sent_first == 0
+    still_pending = store.list_pending_outbound_messages(provider="slack")
+    assert len(still_pending) == 1
+    assert still_pending[0]["attempts"] == 1
+    failed_events = [e for e in store.read_events() if e["type"] == "slack.message.failed"]
+    assert failed_events[-1]["payload"]["attempts"] == 1
+    assert failed_events[-1]["payload"]["retryable"] is True
+
+    # Second drain actually resends because the row stayed pending.
+    sent_second = drain_slack_outbound_queue(
+        store, adapter, sent_at=now.replace(minute=5), raise_on_error=False
+    )
+    assert sent_second == 1
+    assert store.list_pending_outbound_messages(provider="slack") == ()
+    assert store.has_outbound_delivery(dedupe_key) is True
+    assert len(client.sent) == 1
+
+
+def test_outbound_send_failure_becomes_terminal_after_max_attempts(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    config = SlackDmConfig(actor_id="me", dm_channel_id="DTEST")
+    # Always fails: never succeeds within the cap.
+    client = _SendOnceFailsThenSucceedsClient(fail_times=MAX_OUTBOUND_SEND_ATTEMPTS + 1)
+    adapter = SlackDmAdapter(config, client)
+    message = _approval_outbound()
+    now = datetime(2026, 5, 5, 10, 0, 0)
+
+    queue_slack_outbound(store, adapter, (message,), queued_at=now)
+
+    for attempt in range(1, MAX_OUTBOUND_SEND_ATTEMPTS + 1):
+        drain_slack_outbound_queue(
+            store, adapter, sent_at=now.replace(minute=attempt), raise_on_error=False
+        )
+        rows = store.list_pending_outbound_messages(provider="slack")
+        if attempt < MAX_OUTBOUND_SEND_ATTEMPTS:
+            assert len(rows) == 1, f"row should stay pending on attempt {attempt}"
+        else:
+            assert rows == (), "row should be terminal after the cap"
+
+    failed_events = [e for e in store.read_events() if e["type"] == "slack.message.failed"]
+    assert failed_events[-1]["payload"]["attempts"] == MAX_OUTBOUND_SEND_ATTEMPTS
+    assert failed_events[-1]["payload"]["retryable"] is False
+    # Terminal row is no longer drained on the next pass.
+    assert drain_slack_outbound_queue(store, adapter, sent_at=now.replace(hour=11)) == 0
+
+
+# --- BUG A1 (#5): per-message salt keeps distinct replies from colliding ---
+
+
+def test_outbound_distinct_source_messages_both_deliver_same_stable_key(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    config = SlackDmConfig(actor_id="me", dm_channel_id="DTEST")
+    adapter = SlackDmAdapter(config, FakeSlackWebClient(channel_id="DTEST"))
+    now = datetime(2026, 5, 5, 10, 0, 0)
+
+    # Two distinct inbound messages produce the same message_type +
+    # approval_request_id (e.g. repeated agent_patch_rejected) -> historically
+    # collided on one dedupe key and the second was suppressed forever.
+    message = _approval_outbound(message_type="agent_patch_rejected")
+
+    queued_a = queue_slack_outbound(
+        store, adapter, (message,), queued_at=now, source_message_id="slack/DTEST/1.000001"
+    )
+    queued_b = queue_slack_outbound(
+        store, adapter, (message,), queued_at=now, source_message_id="slack/DTEST/2.000002"
+    )
+    # Re-polling the SAME inbound yields the same source id -> still deduped.
+    queued_repoll = queue_slack_outbound(
+        store, adapter, (message,), queued_at=now, source_message_id="slack/DTEST/1.000001"
+    )
+
+    assert queued_a == 1
+    assert queued_b == 1
+    assert queued_repoll == 0
+    assert len(store.list_pending_outbound_messages(provider="slack")) == 2
+
+
+def test_outbound_explicit_dedupe_key_ignores_source_message_id(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    config = SlackDmConfig(actor_id="me", dm_channel_id="DTEST")
+    adapter = SlackDmAdapter(config, FakeSlackWebClient(channel_id="DTEST"))
+    now = datetime(2026, 5, 5, 10, 0, 0)
+
+    message = OutboundMessage(
+        surface="personal_chat",
+        recipient_id="me",
+        message_type="morning_briefing",
+        text="아침 브리핑",
+        card={"dedupe_key": "briefing/2026-05-05"},
+    )
+
+    queued_a = queue_slack_outbound(
+        store, adapter, (message,), queued_at=now, source_message_id="slack/DTEST/1.000001"
+    )
+    # Different source id, but the explicit card dedupe_key must still collapse.
+    queued_b = queue_slack_outbound(
+        store, adapter, (message,), queued_at=now, source_message_id="slack/DTEST/2.000002"
+    )
+
+    assert queued_a == 1
+    assert queued_b == 0
+    assert len(store.list_pending_outbound_messages(provider="slack")) == 1
+
+
+# --- BUG A4 (#14): a store failure during enqueue must not kill the loop ---
+
+
+def test_socket_loop_survives_enqueue_store_failure_and_keeps_running(tmp_path: Path) -> None:
+    real_store = _store(tmp_path)
+
+    class _EnqueueFailsOnceStore:
+        def __init__(self, inner: TeamTaskStore) -> None:
+            self._inner = inner
+            self.enqueue_calls = 0
+
+        def enqueue_inbound_event(self, **kwargs):
+            self.enqueue_calls += 1
+            if self.enqueue_calls == 1:
+                raise RuntimeError("database is locked")
+            return self._inner.enqueue_inbound_event(**kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    store = _EnqueueFailsOnceStore(real_store)
+    web_client = FakeSlackWebClient(channel_id="DTEST")
+    socket_client = FakeSlackSocketClient(
+        envelopes=[
+            _message_im_envelope("env-1", ts="1779167000.000001"),
+            _message_im_envelope("env-2", ts="1779167000.000002"),
+        ]
+    )
+
+    result = asyncio.run(
+        run_slack_socket_loop(
+            store=store,
+            orchestrator=TeamTaskOrchestrator(real_store),
+            adapter=SlackDmAdapter(_config().dm_config, web_client),
+            socket_config=_config(),
+            socket_client=socket_client,
+            dashboard_output=tmp_path / "out" / "dashboard.html",
+            send=True,
+            max_events=2,
+            reconnect=False,
+        )
+    )
+
+    event_types = [event["type"] for event in real_store.read_events()]
+    assert "slack.socket.enqueue.failed" in event_types
+    # The failed envelope was NOT acked (so Slack redelivers it)...
+    assert {"envelope_id": "env-1"} not in socket_client.acks
+    # ...and the loop kept running and acked the next envelope.
+    assert {"envelope_id": "env-2"} in socket_client.acks
+    # The failed envelope is skipped before the per-event counter, so only the
+    # surviving envelope counts.
+    assert result.event_count == 1
+
+
+# --- BUG A3 (#6): failed inbound events retry and re-process cleanly ---
+
+
+class _HandleFailsOnceOrchestrator(TeamTaskOrchestrator):
+    def __init__(self, store: TeamTaskStore, *, fail_times: int) -> None:
+        super().__init__(store)
+        self._fail_times = fail_times
+        self.calls = 0
+
+    def handle_message(self, message):
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            # Mirror the real orchestrator: record the message BEFORE the
+            # fallible work, so a mid-processing crash leaves has_message=True
+            # unless the retry path deletes the half-recorded row.
+            self.store.record_message(message)
+            raise RuntimeError("mid-processing crash")
+        # Success path delegates to the real orchestrator, which performs its
+        # own has_message guard + record_message; it only reaches creation
+        # because the failed attempt's record was deleted on retry.
+        return super().handle_message(message)
+
+
+def test_socket_inbound_failure_retries_and_reprocesses_after_message_delete(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    envelope = _message_im_envelope()
+
+    enqueue_slack_socket_envelope(
+        store=store,
+        adapter=SlackDmAdapter(_config().dm_config, FakeSlackWebClient(channel_id="DTEST")),
+        envelope=envelope,
+        received_at=datetime_from_ts("1779167000.000001"),
+    )
+    [event_row] = store.list_pending_inbound_events(provider="slack_socket")
+    message_id = event_row["message_id"]
+    assert message_id
+
+    orchestrator = _HandleFailsOnceOrchestrator(store, fail_times=1)
+    adapter = SlackDmAdapter(_config().dm_config, FakeSlackWebClient(channel_id="DTEST"))
+
+    # Attempt 1: handle_message raises -> event returns to 'pending' (retryable)
+    # and the half-recorded message row is deleted so the retry is not a no-op.
+    handled_first = process_slack_socket_inbound_queue(
+        store=store,
+        orchestrator=orchestrator,
+        adapter=adapter,
+        dashboard_output=tmp_path / "out" / "dashboard.html",
+        send=True,
+        handled_at=datetime_from_ts("1779167001.000001"),
+    )
+    assert handled_first == ()
+    still_pending = store.list_pending_inbound_events(provider="slack_socket")
+    assert len(still_pending) == 1
+    assert still_pending[0]["attempts"] == 1
+    assert store.has_message(message_id) is False  # deleted so retry reprocesses
+    failed_events = [e for e in store.read_events() if e["type"] == "slack.socket.event.failed"]
+    assert failed_events[-1]["payload"]["attempts"] == 1
+    assert failed_events[-1]["payload"]["retryable"] is True
+
+    # Attempt 2: succeeds and produces a real result (proves the retry reprocessed).
+    handled_second = process_slack_socket_inbound_queue(
+        store=store,
+        orchestrator=orchestrator,
+        adapter=adapter,
+        dashboard_output=tmp_path / "out" / "dashboard.html",
+        send=True,
+        handled_at=datetime_from_ts("1779167002.000001"),
+    )
+    assert len(handled_second) == 1
+    assert handled_second[0].message is not None
+    assert store.list_pending_inbound_events(provider="slack_socket") == ()
+    assert len(store.list_proposals()) == 1
+
+
+def test_socket_inbound_failure_becomes_terminal_after_max_attempts(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    envelope = _message_im_envelope()
+
+    enqueue_slack_socket_envelope(
+        store=store,
+        adapter=SlackDmAdapter(_config().dm_config, FakeSlackWebClient(channel_id="DTEST")),
+        envelope=envelope,
+        received_at=datetime_from_ts("1779167000.000001"),
+    )
+
+    orchestrator = _HandleFailsOnceOrchestrator(store, fail_times=MAX_INBOUND_PROCESS_ATTEMPTS + 1)
+    adapter = SlackDmAdapter(_config().dm_config, FakeSlackWebClient(channel_id="DTEST"))
+
+    for attempt in range(1, MAX_INBOUND_PROCESS_ATTEMPTS + 1):
+        process_slack_socket_inbound_queue(
+            store=store,
+            orchestrator=orchestrator,
+            adapter=adapter,
+            dashboard_output=tmp_path / "out" / "dashboard.html",
+            send=True,
+            handled_at=datetime_from_ts(f"177916700{attempt}.000001"),
+        )
+        pending = store.list_pending_inbound_events(provider="slack_socket")
+        if attempt < MAX_INBOUND_PROCESS_ATTEMPTS:
+            assert len(pending) == 1, f"event should stay pending on attempt {attempt}"
+        else:
+            assert pending == (), "event should be terminal after the cap"
+
+    failed_events = [e for e in store.read_events() if e["type"] == "slack.socket.event.failed"]
+    assert failed_events[-1]["payload"]["attempts"] == MAX_INBOUND_PROCESS_ATTEMPTS
+    assert failed_events[-1]["payload"]["retryable"] is False
+
+
+# --- BUG #13: reconnect uses bounded exponential backoff and a protected open ---
+
+
+def test_reconnect_delay_seconds_grows_with_attempt_and_is_capped() -> None:
+    # Pin jitter to its midpoint so the assertion is deterministic.
+    import task_management.slack_socket as socket_module
+
+    original_uniform = socket_module.random.uniform
+    socket_module.random.uniform = lambda a, b: (a + b) / 2.0
+    try:
+        delays = [_reconnect_delay_seconds(attempt, base=1.0, cap=30.0) for attempt in range(8)]
+    finally:
+        socket_module.random.uniform = original_uniform
+
+    # Strictly grows until it saturates, never exceeds the cap, and is positive.
+    assert delays[0] < delays[1] < delays[2] < delays[3]
+    assert all(0.0 < delay <= 30.0 for delay in delays)
+    # High attempts saturate at the cap.
+    assert delays[-1] == 30.0
+    assert _reconnect_delay_seconds(100, base=1.0, cap=30.0) == 30.0
+    # A different cap is honored.
+    assert _reconnect_delay_seconds(100, base=1.0, cap=5.0) == 5.0
+
+
+def test_socket_loop_recovers_from_open_connection_failure_with_bounded_backoff(
+    tmp_path: Path,
+) -> None:
+    class OpenFailsOnceClient:
+        def __init__(self) -> None:
+            self.open_count = 0
+            self.acks: list[dict[str, object]] = []
+
+        def open_connection(self, app_token: str) -> str:
+            self.open_count += 1
+            if self.open_count == 1:
+                raise RuntimeError("apps.connections.open rate limited")
+            return f"wss://fake.slack/socket/{self.open_count}"
+
+        async def iter_envelopes(self, url: str):
+            yield {"type": "hello", "num_connections": 1}
+            yield _message_im_envelope()
+
+        async def ack(self, envelope_id: str, payload=None) -> None:
+            item: dict[str, object] = {"envelope_id": envelope_id}
+            if payload is not None:
+                item["payload"] = dict(payload)
+            self.acks.append(item)
+
+    store = _store(tmp_path)
+    web_client = FakeSlackWebClient(channel_id="DTEST")
+    socket_client = OpenFailsOnceClient()
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        # Record the computed backoff instead of really waiting (fast + bounded).
+        sleeps.append(delay)
+
+    result = asyncio.run(
+        run_slack_socket_loop(
+            store=store,
+            orchestrator=TeamTaskOrchestrator(store),
+            adapter=SlackDmAdapter(_config().dm_config, web_client),
+            socket_config=_config(),
+            socket_client=socket_client,
+            dashboard_output=tmp_path / "out" / "dashboard.html",
+            send=True,
+            max_events=1,
+            reconnect=True,
+            sleep=fake_sleep,
+        )
+    )
+
+    # The first open raised, the loop retried after a single bounded backoff, and
+    # then processed the subsequent envelope without crashing.
+    assert socket_client.open_count == 2
+    assert result.connected is True
+    assert result.stopped_reason == "max_events"
+    assert result.event_count == 1
+    assert len(web_client.sent) == 1
+    assert socket_client.acks == [{"envelope_id": "env-1"}]
+    # Exactly one backoff sleep happened and it was bounded by the cap.
+    assert len(sleeps) == 1
+    assert 0.0 < sleeps[0] <= 30.0
+    event_types = [event["type"] for event in store.read_events()]
+    assert "slack.socket.connection.error" in event_types
+    assert "slack.socket.event.handled" in event_types
+    connection_errors = [
+        event for event in store.read_events() if event["type"] == "slack.socket.connection.error"
+    ]
+    assert connection_errors[0]["payload"]["error_type"] == "RuntimeError"
+    assert "rate limited" in connection_errors[0]["payload"]["error"]

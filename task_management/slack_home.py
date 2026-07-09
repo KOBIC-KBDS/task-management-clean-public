@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from .relations import (
+    PROGRESS_STATUS_KEY,
+    REMAINING_WORK_KEY,
+)
+
 from datetime import datetime
 from typing import Any, Mapping
 
 from .frontend import build_web_task_page_model
-from .human_view import datetime_label, render_missing_slot_labels
+from .human_view import datetime_label, missing_slots_card_label, proposal_status_icon
 from .slack_adapter import SlackDmAdapter
 from .sort_keys import time_sort_minutes
 from .store import TeamTaskStore
@@ -150,8 +155,8 @@ def _proposal_line(item: Mapping[str, str]) -> str:
             item.get("date_label", "") or item.get("date", ""),
             item.get("time_window", ""),
             item.get("status_label", ""),
-            f"진행: {item.get('progress_status', '')}" if item.get("progress_status") else "",
-            f"남은 일: {item.get('remaining_work', '')}" if item.get("remaining_work") else "",
+            f"진행: {item.get(PROGRESS_STATUS_KEY, '')}" if item.get(PROGRESS_STATUS_KEY) else "",
+            f"남은 일: {item.get(REMAINING_WORK_KEY, '')}" if item.get(REMAINING_WORK_KEY) else "",
             f"확인: {_missing_slots_label(item)}" if item.get("missing_slots") else "",
         )
         if part
@@ -198,8 +203,8 @@ def _subtask_line(child: Mapping[str, str]) -> str:
             f"🔴 {urgency}" if urgency else "",
             child.get("date_label", "") or child.get("date", ""),
             child.get("time_window", ""),
-            f"진행: {child.get('progress_status', '')}" if child.get("progress_status") else "",
-            f"남은 일: {child.get('remaining_work', '')}" if child.get("remaining_work") else "",
+            f"진행: {child.get(PROGRESS_STATUS_KEY, '')}" if child.get(PROGRESS_STATUS_KEY) else "",
+            f"남은 일: {child.get(REMAINING_WORK_KEY, '')}" if child.get(REMAINING_WORK_KEY) else "",
             f"확인: {_missing_slots_label(child)}" if child.get("missing_slots") else "",
         )
         if part
@@ -215,15 +220,7 @@ def _title_display(item: Mapping[str, str]) -> str:
 
 
 def _status_display(item: Mapping[str, str]) -> str:
-    icon = {
-        "draft": "▫️",
-        "posted": "▫️",
-        "awaiting_approval": "",
-        "approved": "☐",
-        "rejected": "⛔",
-        "applied": "✅",
-        "done": "✅",
-    }.get(str(item.get("status") or ""), "▫️")
+    icon = proposal_status_icon(str(item.get("status") or ""))
     status = str(item.get("status_label") or item.get("status") or "")
     return f"{icon} {status}" if icon else status
 
@@ -279,14 +276,10 @@ def _escape(text: str) -> str:
 
 
 def _missing_slots_label(item: Mapping[str, str]) -> str:
-    labels = str(item.get("missing_slot_labels") or "")
-    if labels:
-        return labels
-    return render_missing_slot_labels(_split_csv(str(item.get("missing_slots") or "")))
-
-
-def _split_csv(value: str) -> tuple[str, ...]:
-    return tuple(part.strip() for part in value.split(",") if part.strip())
+    return missing_slots_card_label(
+        str(item.get("missing_slot_labels") or ""),
+        str(item.get("missing_slots") or ""),
+    )
 
 
 def _item_sort_key(item: Mapping[str, str]) -> tuple[int, str, int, str]:

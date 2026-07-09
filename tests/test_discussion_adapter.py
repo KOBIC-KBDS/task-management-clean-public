@@ -128,6 +128,32 @@ def test_temporal_update_understands_next_weekday_feedback() -> None:
     assert "location" not in update
 
 
+def test_today_half_past_meeting_defaults_to_speaker_event() -> None:
+    update = parse_temporal_update(
+        "1시 반에 회의실에서 외부 연락 후속 회의",
+        reference_date=date(2026, 6, 12),
+    )
+
+    assert update["scheduled_date"] == "2026-06-12"
+    assert update["time_window"] == "13:30"
+    assert update["location"] == "회의실"
+
+    candidates = parse_manual_discussion(
+        "1시 반에 회의실에서 외부 연락 후속 회의",
+        discussion_id="manual/2026-06-12",
+        reference_date=date(2026, 6, 12),
+    )
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.item_type == "event"
+    assert candidate.assigned_to == "me"
+    assert candidate.scheduled_date == date(2026, 6, 12)
+    assert candidate.time_window == "13:30"
+    assert candidate.metadata["location"] == "회의실"
+    assert candidate.metadata["participants"] == "me"
+
+
 def test_self_intention_without_tags_becomes_this_week_deadline_task() -> None:
     candidates = parse_manual_discussion(
         "이번주 안에 자동차 보험 갱신해야겠다",

@@ -1,14 +1,14 @@
 # Module Map: task-management-public-release
 
 - Target repo: `<repo-root>`
-- Generated at: `2026-06-03T08:43:17Z`
+- Generated at: `2026-06-13T12:02:13Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Module Dependency Diagram
 
 ```mermaid
 flowchart LR
-  src_tests["tests"] -->|26| dst_task_management["task_management"]
+  src_tests["tests"] -->|28| dst_task_management["task_management"]
 ```
 
 ## Python First-party Roots
@@ -44,10 +44,17 @@ flowchart LR
 | `task_management/__init__.py` | slack_digest (python-from-import, internal=False) |
 | `task_management/__init__.py` | task_reconciler (python-from-import, internal=False) |
 | `task_management/__init__.py` | task_core_bridge (python-from-import, internal=False) |
+| `task_management/approval_flow.py` | __future__ (python-from-import, internal=False) |
+| `task_management/approval_flow.py` | dataclasses (python-from-import, internal=False) |
+| `task_management/approval_flow.py` | datetime (python-from-import, internal=False) |
+| `task_management/approval_flow.py` | typing (python-from-import, internal=False) |
+| `task_management/approval_flow.py` | domain (python-from-import, internal=False) |
+| `task_management/approval_flow.py` | store (python-from-import, internal=False) |
 | `task_management/approval_policy.py` | __future__ (python-from-import, internal=False) |
 | `task_management/approval_policy.py` | dataclasses (python-from-import, internal=False) |
 | `task_management/approval_policy.py` | datetime (python-from-import, internal=False) |
 | `task_management/approval_policy.py` | hashlib (python-import, internal=False) |
+| `task_management/approval_policy.py` | channels (python-from-import, internal=False) |
 | `task_management/approval_policy.py` | domain (python-from-import, internal=False) |
 | `task_management/approval_policy.py` | human_view (python-from-import, internal=False) |
 | `task_management/approval_policy.py` | slot_validator (python-from-import, internal=False) |
@@ -58,6 +65,7 @@ flowchart LR
 | `task_management/attention.py` | typing (python-from-import, internal=False) |
 | `task_management/attention.py` | domain (python-from-import, internal=False) |
 | `task_management/attention.py` | relations (python-from-import, internal=False) |
+| `task_management/attention.py` | work_item_state (python-from-import, internal=False) |
 | `task_management/backfill_report.py` | __future__ (python-from-import, internal=False) |
 | `task_management/backfill_report.py` | dataclasses (python-from-import, internal=False) |
 | `task_management/backfill_report.py` | datetime (python-from-import, internal=False) |
@@ -65,9 +73,12 @@ flowchart LR
 | `task_management/backfill_report.py` | pathlib (python-from-import, internal=False) |
 | `task_management/backfill_report.py` | typing (python-from-import, internal=False) |
 | `task_management/backfill_report.py` | domain (python-from-import, internal=False) |
+| `task_management/channels.py` | __future__ (python-from-import, internal=False) |
+| `task_management/channels.py` | dataclasses (python-from-import, internal=False) |
+| `task_management/channels.py` | source_refs (python-from-import, internal=False) |
 | `task_management/chat_adapter.py` | __future__ (python-from-import, internal=False) |
-| `task_management/chat_adapter.py` | typing (python-from-import, internal=False) |
 | `task_management/chat_adapter.py` | domain (python-from-import, internal=False) |
+| `task_management/chat_adapter.py` | slack_adapter (python-from-import, internal=False) |
 | `task_management/claude_code_operating_agent.py` | __future__ (python-from-import, internal=False) |
 | `task_management/claude_code_operating_agent.py` | dataclasses (python-from-import, internal=False) |
 | `task_management/claude_code_operating_agent.py` | json (python-import, internal=False) |
@@ -78,17 +89,6 @@ flowchart LR
 | `task_management/claude_code_operating_agent.py` | typing (python-from-import, internal=False) |
 | `task_management/claude_code_operating_agent.py` | domain (python-from-import, internal=False) |
 | `task_management/claude_code_operating_agent.py` | operating_agent (python-from-import, internal=False) |
-| `task_management/claude_code_operating_agent.py` | operating_agent_prompt (python-from-import, internal=False) |
-| `task_management/claude_code_operating_agent.py` | semantic_context (python-from-import, internal=False) |
-| `task_management/cli.py` | __future__ (python-from-import, internal=False) |
-| `task_management/cli.py` | argparse (python-import, internal=False) |
-| `task_management/cli.py` | asyncio (python-import, internal=False) |
-| `task_management/cli.py` | dataclasses (python-from-import, internal=False) |
-| `task_management/cli.py` | datetime (python-from-import, internal=False) |
-| `task_management/cli.py` | json (python-import, internal=False) |
-| `task_management/cli.py` | os (python-import, internal=False) |
-| `task_management/cli.py` | pathlib (python-from-import, internal=False) |
-| `task_management/cli.py` | shutil (python-import, internal=False) |
 
 
 ## Inference Notes

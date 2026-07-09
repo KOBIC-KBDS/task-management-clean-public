@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+from .relations import (
+    ATTENDEES_KEY,
+    DATE_WINDOW_END_KEY,
+    DATE_WINDOW_LABEL_KEY,
+    DATE_WINDOW_START_KEY,
+    EXTERNAL_PARTICIPANTS_KEY,
+    LINK_PREP_SUBTASK,
+    LINK_TYPE_KEY,
+    LOCATION_KEY,
+    PARTICIPANTS_KEY,
+    PARTICIPANT_LABEL_KEY,
+)
+
 from dataclasses import dataclass
 from datetime import date, datetime
 import os
 from typing import Iterable
 
-from .domain import Proposal
+from .domain import KIND_SPECS, Proposal
 
 
 ACTOR_LABELS = {
@@ -39,8 +52,8 @@ MISSING_SLOT_LABELS = {
     "date": "일시",
     "exact_date": "정확한 날짜",
     "time": "정확한 시간",
-    "location": "장소",
-    "participants": "참여자",
+    LOCATION_KEY: "장소",
+    PARTICIPANTS_KEY: "참여자",
     "assigned_to": "담당자",
     "recurrence": "반복 주기",
 }
@@ -105,17 +118,17 @@ def render_confirmed_sentence(proposal: Proposal, *, include_short_id: bool = Tr
     title = proposal.title
     assignee = actor_label(proposal.assigned_to)
     when = human_when_label(proposal)
-    location = proposal.metadata.get("location", "")
+    location = proposal.metadata.get(LOCATION_KEY, "")
     participants = proposal_participants_label(proposal)
     participant_sentence = f" 관련자는 {participants}입니다." if participants and participants != assignee else ""
     prep_parent = proposal.metadata.get("parent_proposal_id", "")
     suffix = f" `{short_id(proposal.proposal_id)}`" if include_short_id else ""
-    if proposal.metadata.get("link_type") == "prep_subtask":
+    if proposal.metadata.get(LINK_TYPE_KEY) == LINK_PREP_SUBTASK:
         prefix = due_when_prefix(when)
         parent = " 관련 준비 작업" if prep_parent else ""
         target = object_phrase(f"{title}{parent}")
         return f"{prefix}{target} 완료해야 합니다. 담당자는 {assignee}입니다.{suffix}"
-    if proposal.kind == "event" or proposal.scheduled_date is not None:
+    if KIND_SPECS[proposal.kind].schedulable or proposal.scheduled_date is not None:
         prefix = f"{when}에 " if when else ""
         sentence = f"{prefix}{title} 일정이 예정되어 있습니다. 담당자는 {assignee}입니다.{participant_sentence}"
         if location:
@@ -135,9 +148,9 @@ def human_when_label(proposal: Proposal | None) -> str:
         parts.append(date_label(proposal_date))
     if proposal.time_window:
         parts.append(time_label(proposal.time_window))
-    if proposal.metadata.get("date_window_start") and proposal.metadata.get("date_window_end"):
-        start = date.fromisoformat(proposal.metadata["date_window_start"])
-        end = date.fromisoformat(proposal.metadata["date_window_end"])
+    if proposal.metadata.get(DATE_WINDOW_START_KEY) and proposal.metadata.get(DATE_WINDOW_END_KEY):
+        start = date.fromisoformat(proposal.metadata[DATE_WINDOW_START_KEY])
+        end = date.fromisoformat(proposal.metadata[DATE_WINDOW_END_KEY])
         parts.append(f"{date_range_label(start, end)} 중")
     return " ".join(parts)
 
@@ -221,17 +234,33 @@ def actor_list_label(value: str) -> str:
     return ", ".join(actor_label(item) for item in people)
 
 
-def proposal_participants_label(proposal: Proposal) -> str:
+def proposal_participants_label(proposal: Proposal, *, translate: bool = True) -> str:
     metadata = proposal.metadata
-    if metadata.get("participant_label"):
-        return metadata["participant_label"]
-    if metadata.get("attendees"):
-        return metadata["attendees"]
-    participants = actor_list_label(metadata.get("participants", ""))
-    external = metadata.get("external_participants", "")
+    if metadata.get(PARTICIPANT_LABEL_KEY):
+        return metadata[PARTICIPANT_LABEL_KEY]
+    if metadata.get(ATTENDEES_KEY):
+        return metadata[ATTENDEES_KEY]
+    raw_participants = metadata.get(PARTICIPANTS_KEY, "")
+    participants = actor_list_label(raw_participants) if translate else raw_participants
+    external = metadata.get(EXTERNAL_PARTICIPANTS_KEY, "")
     if participants and external:
         return f"{participants} + {external}"
     return participants or external
+
+
+def proposal_date_window_label(proposal: Proposal) -> str:
+    start = proposal.metadata.get(DATE_WINDOW_START_KEY, "")
+    end = proposal.metadata.get(DATE_WINDOW_END_KEY, "")
+    label = proposal.metadata.get(DATE_WINDOW_LABEL_KEY, "")
+    return date_window_display_label(start, end, label)
+
+
+def missing_slots_card_label(missing_slot_labels: str, missing_slots: str) -> str:
+    if missing_slot_labels:
+        return missing_slot_labels
+    return render_missing_slot_labels(
+        tuple(item.strip() for item in missing_slots.split(",") if item.strip())
+    )
 
 
 def short_id(value: str) -> str:

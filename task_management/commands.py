@@ -26,7 +26,7 @@ class InstanceProbeCommand:
 
 
 def parse_chat_command(text: str) -> ChatCommand | None:
-    match = COMMAND_RE.match(text)
+    match = COMMAND_RE.match(_normalize_command_text(text))
     if not match:
         return None
     verb = match.group("verb").lower()
@@ -49,6 +49,21 @@ def parse_chat_command(text: str) -> ChatCommand | None:
         target_id=match.group("target"),
         body=(match.group("body") or "").strip(),
     )
+
+
+def _normalize_command_text(text: str) -> str:
+    normalized = text.strip()
+    # Slack rich-text code/bold formatting can arrive as literal wrappers in
+    # message.text.  The command contract is semantic, so strip only wrappers
+    # that cover the whole command and leave the command body intact.
+    changed = True
+    while changed and len(normalized) >= 2:
+        changed = False
+        for marker in ("`", "*", "_", "~"):
+            if normalized.startswith(marker) and normalized.endswith(marker):
+                normalized = normalized[1:-1].strip()
+                changed = True
+    return normalized
 
 
 def parse_instance_probe(text: str) -> InstanceProbeCommand | None:

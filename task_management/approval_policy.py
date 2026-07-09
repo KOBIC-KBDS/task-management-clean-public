@@ -4,19 +4,24 @@ from dataclasses import replace
 from datetime import datetime
 import hashlib
 
-from .domain import ApprovalRequest, OutboundMessage, Proposal
+from .channels import notification_label_for_provider
+from .domain import KIND_SPECS, ApprovalRequest, OutboundMessage, Proposal
 from .human_view import (
     build_missing_slot_question,
     date_label,
-    date_window_display_label,
+    proposal_date_window_label,
     render_confirmed_sentence,
     render_missing_slot_labels,
     render_missing_slot_sentence,
 )
 from .slot_validator import missing_slots_for_proposal
 from .relations import (
+    INTAKE_POLICY_KEY,
+    LOCATION_KEY,
+    PARTICIPANTS_KEY,
     REQUIRES_SEPARATE_APPROVAL_KEY,
     RISK_LEVEL_KEY,
+    SOURCE_PROVIDER_KEY,
     STEP_COUNT_KEY,
     STEP_INDEX_KEY,
     WORKFLOW_GROUP_CHILD_IDS_KEY,
@@ -39,7 +44,7 @@ def apply_initial_policy(
 ) -> tuple[Proposal, tuple[ApprovalRequest, ...], tuple[OutboundMessage, ...]]:
     """Apply MVP approval policy to a newly created proposal."""
 
-    if proposal.metadata.get("intake_policy") == "user_confirmation_required":
+    if proposal.metadata.get(INTAKE_POLICY_KEY) == "user_confirmation_required":
         approver = proposal.proposer_id or "me"
         awaiting = replace(
             proposal,
@@ -63,7 +68,7 @@ def apply_initial_policy(
             ),
         )
 
-    if proposal.kind == "reference":
+    if KIND_SPECS[proposal.kind].auto_approve_on_intake:
         approved = replace(proposal, status="approved", approvals=(), required_approvers=(), updated_at=now)
         return approved, (), (
             team_message(
@@ -333,8 +338,8 @@ def proposal_card(proposal: Proposal) -> dict[str, str]:
         "date_window": date_window_label(proposal),
         "missing_slots": ",".join(proposal.missing_slots),
         "missing_slot_labels": render_missing_slot_labels(proposal.missing_slots),
-        "participants": proposal.metadata.get("participants", ""),
-        "location": proposal.metadata.get("location", ""),
+        PARTICIPANTS_KEY: proposal.metadata.get(PARTICIPANTS_KEY, ""),
+        LOCATION_KEY: proposal.metadata.get(LOCATION_KEY, ""),
         "recurrence": proposal.metadata.get("recurrence_frequency", ""),
     }
     for key in (
@@ -360,14 +365,11 @@ def proposal_card(proposal: Proposal) -> dict[str, str]:
 
 
 def date_window_label(proposal: Proposal) -> str:
-    start = proposal.metadata.get("date_window_start", "")
-    end = proposal.metadata.get("date_window_end", "")
-    label = proposal.metadata.get("date_window_label", "")
-    return date_window_display_label(start, end, label)
+    return proposal_date_window_label(proposal)
 
 
 def render_confirmation_required_sentence(proposal: Proposal, *, request_id: str) -> str:
-    source = "Slack 알림" if proposal.metadata.get("source_provider") == "slack" else "외부 알림"
+    source = notification_label_for_provider(proposal.metadata.get(SOURCE_PROVIDER_KEY, ""))
     missing = (
         f"\n필요한 정보: {render_missing_slot_labels(proposal.missing_slots)}"
         if proposal.missing_slots

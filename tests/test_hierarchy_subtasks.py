@@ -13,16 +13,24 @@ from task_management.orchestrator import TeamTaskOrchestrator
 from task_management.relations import (
     blocking_dependencies,
     child_proposals,
+    order_child_proposals,
     relation_sort_key,
+    requires_separate_approval,
+    step_label,
     validate_workflow_relations,
     workflow_projection,
 )
+from task_management.sort_keys import proposal_deadline_sort_key, time_sort_minutes
 from task_management.slack_home import build_slack_home_view
 from task_management.secretary import build_morning_briefing
 from task_management.store import TeamTaskStore
 from task_management.task_core_bridge import build_task_management_task_export_from_proposals
 from task_management.timeline import proposal_timeline
-from task_management.workflow_normalizer import normalize_existing_proposal_graph
+from task_management.workflow_normalizer import (
+    _series_title,
+    normalize_existing_proposal_graph,
+    normalize_new_proposal_graph,
+)
 
 
 NOW = datetime(2026, 5, 29, 9, 0, 0)
@@ -46,6 +54,60 @@ class StaticDraftAgent:
             rationale="A sequential workflow was detected.",
             proposal_drafts=self.drafts,
         )
+
+
+def test_workflow_child_time_tiebreak_matches_deadline_sorter() -> None:
+    """Regression: workflow-child time tie-breaks now use the canonical clock parser.
+
+    relations._time_sort_minutes used to be a cruder divergent re-implementation:
+    it mapped any "오후..." window to a flat 13*60 (ignoring the actual hour) and a
+    bare "오전" to 540 (sort_keys uses 480), and could not read the minute of a
+    Korean clock string at all. The deadline sorter (sort_keys.time_sort_minutes)
+    instead reads "오후 3시" as 15*60=900. That divergence let workflow-child
+    ordering disagree with deadline ordering. The fix routes the relations
+    tie-break through sort_keys.time_sort_minutes, so the two now agree.
+    """
+
+    parent = _proposal("proposal/wf-time", "Time workflow")
+    # Same date, no step_index -> ordering falls to the deadline tie-break, where
+    # only the resolved minute (then title) decides order.
+    clock = replace(
+        _proposal(
+            "proposal/clock",
+            "힣 13:30 항목",  # title sorts AFTER the 오후 item, so only the minute can reorder it
+            due_date=date(2026, 6, 2),
+            metadata={"parent_proposal_id": parent.proposal_id},
+        ),
+        time_window="13:30",
+    )
+    afternoon = replace(
+        _proposal(
+            "proposal/afternoon",
+            "오후 3시 항목",
+            due_date=date(2026, 6, 2),
+            metadata={"parent_proposal_id": parent.proposal_id},
+        ),
+        time_window="오후 3시",
+    )
+
+    # The relations tie-break now resolves the canonical clock minutes the deadline
+    # sorter uses: "오후 3시" -> 900 (was a flat 780), "13:30" -> 810 (was 780).
+    assert time_sort_minutes("오후 3시") == 15 * 60
+    assert time_sort_minutes("13:30") == 13 * 60 + 30
+    assert time_sort_minutes("오전") == 8 * 60
+
+    # Under the old flat-780 mapping these two tied on minute, so the title
+    # decided and "오후 3시 항목" (오 < 힣) sorted first -> (afternoon, clock).
+    # With the canonical parser 13:30 (810) precedes 오후 3시 (900), flipping the
+    # order to (clock, afternoon) and matching the deadline sorter.
+    ordered = order_child_proposals([afternoon, clock])
+    assert ordered == (clock, afternoon)
+
+    deadline_ordered = sorted(
+        [afternoon, clock],
+        key=lambda proposal: proposal_deadline_sort_key(proposal, today=date(2026, 6, 1)),
+    )
+    assert tuple(deadline_ordered) == ordered
 
 
 def test_relation_projection_orders_by_step_and_surfaces_blockers() -> None:
@@ -166,6 +228,16 @@ def test_workflow_batch_uses_group_approval_and_keeps_risky_child_separate(tmp_p
     assert store.get_proposal("proposal/send").status == "awaiting_approval"  # type: ignore[union-attr]
 
 
+def test_workflow_risk_is_read_from_semantic_metadata_not_title_tokens() -> None:
+    assert requires_separate_approval(
+        _proposal("p/semantic", "외부 공지", metadata={"requires_separate_approval": "true"})
+    )
+    assert requires_separate_approval(
+        _proposal("p/risk-level", "후속 안내", metadata={"risk_level": "high", "risk_reason": "external_send"})
+    )
+    assert not requires_separate_approval(_proposal("p/title-only", "정보실 메일 안내"))
+
+
 def test_invalid_workflow_batch_saves_no_proposals(tmp_path: Path) -> None:
     store = _store(tmp_path)
     parent = _draft("proposal/workflow", "Workflow", metadata={"workflow_role": "parent"})
@@ -181,6 +253,166 @@ def test_invalid_workflow_batch_saves_no_proposals(tmp_path: Path) -> None:
     assert result.outbound_messages[0].message_type == "workflow_batch_rejected"
     assert "duplicate_step_index" in result.outbound_messages[0].card["error_codes"]
     assert "workflow.batch.rejected" in [event["type"] for event in store.read_events()]
+
+
+def test_workflow_parent_cycle_is_rejected_without_corrupting_state(tmp_path: Path) -> None:
+    # Bug #16: a 2-draft batch with mutual parent_proposal_id (A<->B) must be
+    # rejected through the workflow.batch.rejected path, never silently accepted.
+    store = _store(tmp_path)
+    draft_a = _draft("proposal/a", "Cycle A", metadata={"parent_proposal_id": "proposal/b"})
+    draft_b = _draft("proposal/b", "Cycle B", metadata={"parent_proposal_id": "proposal/a"})
+
+    result = TeamTaskOrchestrator(store, operating_agent=StaticDraftAgent((draft_a, draft_b))).handle_message(
+        _message("mutual parent cycle")
+    )
+
+    assert result.proposals == ()
+    assert store.list_proposals() == ()
+    assert result.outbound_messages[0].message_type == "workflow_batch_rejected"
+    assert "relation_cycle" in result.outbound_messages[0].card["error_codes"]
+    assert "workflow.batch.rejected" in [event["type"] for event in store.read_events()]
+
+
+def test_resending_identical_commitment_merges_into_existing_canonical(tmp_path: Path) -> None:
+    # Bug #17: re-sending an identical note after a prior merge must dedup at
+    # intake (same source_text_hash + title/date/time) instead of stacking a
+    # second live card.
+    store = _store(tmp_path)
+
+    def _commitment_draft(source_key: str) -> ProposalDraft:
+        return ProposalDraft(
+            source_key=source_key,
+            raw_text="3회 보고서 작성",
+            title="보고서 작성",
+            discussion_id="slack/DTEST",
+            message_id=f"slack/DTEST/{source_key}",
+            line_number=1,
+            speaker="me",
+            assigned_to="me",
+            task_management_area="work",
+            due_date=date(2026, 6, 5),
+            time_window="10:00",
+            item_type="task",
+            metadata={},
+        )
+
+    first = TeamTaskOrchestrator(store, operating_agent=StaticDraftAgent((_commitment_draft("proposal/first"),))).handle_message(
+        IncomingMessage(
+            message_id="slack/DTEST/first",
+            sender_id="me",
+            chat_id="DTEST",
+            visibility="private",
+            text="보고서 작성",
+            received_at=datetime(2026, 6, 4, 9, 0),
+        )
+    )
+    canonical = store.get_proposal("proposal/first")
+    assert canonical is not None
+    assert canonical.status != "rejected"
+    first_hash = canonical.metadata["source_text_hash"]
+
+    TeamTaskOrchestrator(store, operating_agent=StaticDraftAgent((_commitment_draft("proposal/second"),))).handle_message(
+        IncomingMessage(
+            message_id="slack/DTEST/second",
+            sender_id="me",
+            chat_id="DTEST",
+            visibility="private",
+            text="보고서 작성",
+            received_at=datetime(2026, 6, 4, 10, 0),
+        )
+    )
+
+    duplicate = store.get_proposal("proposal/second")
+    assert duplicate is not None
+    assert duplicate.metadata["source_text_hash"] == first_hash
+    assert duplicate.status == "rejected"
+    assert duplicate.metadata["merged_into_proposal_id"] == "proposal/first"
+    assert duplicate.required_approvers == ()
+    assert duplicate.approvals == ()
+    assert "proposal.merged_duplicate" in [event["type"] for event in store.read_events()]
+
+    model = build_web_task_page_model(store, today=date(2026, 6, 5))
+    today_cards = [item for item in model["sections"]["today"] if item["title"] == "보고서 작성"]
+    assert len(today_cards) == 1
+    assert today_cards[0]["proposal_id"] == "proposal/first"
+    assert today_cards[0]["status"] != "rejected"
+
+
+def test_step_labels_recompute_after_third_child_attaches(tmp_path: Path) -> None:
+    # Bug #18: existing children must not keep a stale /2 denominator once a
+    # third follow-up child attaches under the same root.
+    store = _store(tmp_path)
+    parent = _proposal(
+        "proposal/root",
+        "Workflow",
+        metadata={"workflow_role": "parent", "workflow_title": "Workflow"},
+    )
+    first = _proposal(
+        "proposal/c1",
+        "First",
+        due_date=date(2026, 6, 1),
+        metadata={"parent_proposal_id": parent.proposal_id, "step_index": "1", "step_count": "2"},
+    )
+    second = _proposal(
+        "proposal/c2",
+        "Second",
+        due_date=date(2026, 6, 2),
+        metadata={"parent_proposal_id": parent.proposal_id, "step_index": "2", "step_count": "2"},
+    )
+
+    # Stored labels are stale (1/2, 2/2) until the third child arrives.
+    assert step_label(first, (parent, first, second)) == "1/2"
+
+    third = _proposal(
+        "proposal/c3",
+        "Third",
+        due_date=date(2026, 6, 3),
+        metadata={"parent_proposal_id": parent.proposal_id, "step_index": "3", "step_count": "2"},
+    )
+    proposals = (parent, first, second, third)
+
+    assert step_label(first, proposals) == "1/3"
+    assert step_label(second, proposals) == "2/3"
+    assert step_label(third, proposals) == "3/3"
+
+    for proposal in proposals:
+        store.save_proposal(proposal)
+        store.append_event("proposal.created", {"proposal": proposal}, occurred_at=NOW)
+
+    model = build_web_task_page_model(store, today=date(2026, 6, 1))
+    root_item = next(item for section in model["sections"].values() for item in section if item["title"] == "Workflow")
+    child_labels = [child["step_label"] for child in root_item["children"]]
+    assert child_labels == ["1/3", "2/3", "3/3"]
+    assert "2/2" not in child_labels
+
+
+def test_series_title_ignores_korean_counting_phrases() -> None:
+    # Bug (LOW): counting phrases like '지난 3회 동안 ...' must not become a
+    # series identity, while genuine ordinal series stay intact.
+    assert _series_title("지난 3회 동안 못 끝낸 보고서") == ""
+    assert _series_title("3회째") == ""
+    assert _series_title("5회 연속 지각") == ""
+    assert _series_title("제3회 ai-study") == "제3회 ai-study"
+    assert _series_title("3회 스터디") == "제3회 스터디"
+
+    # An unrelated counting-phrase follow-up task must not be reparented under a
+    # real workflow root just because both mention "N회".
+    root = replace(
+        _proposal("proposal/series-root", "ai-study 발표자료 리뷰 논의", status="approved"),
+        kind="event",
+        scheduled_date=date(2026, 5, 28),
+        metadata={"workflow_role": "parent", "workflow_title": "제3회 ai-study", "workflow_container": "true"},
+    )
+    unrelated = _proposal(
+        "proposal/counting-followup",
+        "지난 3회 동안 못 끝낸 보고서 완료보고서 메일 발송",
+        status="approved",
+        due_date=date(2026, 6, 3),
+    )
+
+    normalized = normalize_new_proposal_graph((root,), (unrelated,), normalized_at=datetime(2026, 6, 3, 12, 0))
+    reparented = normalized.proposals[0]
+    assert reparented.metadata.get("parent_proposal_id", "") != root.proposal_id
 
 
 def test_existing_parent_workflow_child_does_not_auto_approve(tmp_path: Path) -> None:
@@ -338,14 +570,14 @@ def test_done_dashboard_keeps_workflow_children_under_parent(tmp_path: Path) -> 
 def test_new_followup_rehomes_under_promoted_workflow_root(tmp_path: Path) -> None:
     store = _store(tmp_path)
     root = replace(
-        _proposal("proposal/review", "demo-study 발표자료 리뷰 논의", status="approved"),
+        _proposal("proposal/review", "ai-study 발표자료 리뷰 논의", status="approved"),
         kind="event",
         scheduled_date=date(2026, 5, 28),
         time_window="10:00",
         metadata={"participants": "me", "progress_status": "scheduled_for_13_00_to_13_30"},
     )
     decision_child = replace(
-        _proposal("proposal/date-decision", "제3회 demo-study 일정 결정", status="done"),
+        _proposal("proposal/date-decision", "제3회 ai-study 일정 결정", status="done"),
         kind="event",
         scheduled_date=date(2026, 6, 2),
         time_window="14:00",
@@ -359,7 +591,7 @@ def test_new_followup_rehomes_under_promoted_workflow_root(tmp_path: Path) -> No
     store.save_proposal(decision_child)
     followup = _draft(
         "proposal/followup",
-        "3회 demo-study 후속자료·완료보고서 메일 발송",
+        "3회 ai-study 후속자료·완료보고서 메일 발송",
         due_date=date(2026, 6, 3),
         metadata={
             "parent_proposal_id": decision_child.proposal_id,
@@ -384,10 +616,10 @@ def test_new_followup_rehomes_under_promoted_workflow_root(tmp_path: Path) -> No
     created = store.get_proposal("proposal/followup")
     assert promoted is not None
     assert created is not None
-    assert promoted.title == "제3회 demo-study"
+    assert promoted.title == "제3회 ai-study"
     assert promoted.metadata["workflow_role"] == "parent"
     assert promoted.metadata["workflow_container"] == "true"
-    assert promoted.metadata["previous_title"] == "demo-study 발표자료 리뷰 논의"
+    assert promoted.metadata["previous_title"] == "ai-study 발표자료 리뷰 논의"
     assert created.metadata["parent_proposal_id"] == root.proposal_id
     assert created.metadata["depends_on_proposal_ids"] == decision_child.proposal_id
     assert created.status == "awaiting_approval"
@@ -396,28 +628,28 @@ def test_new_followup_rehomes_under_promoted_workflow_root(tmp_path: Path) -> No
 
     model = build_web_task_page_model(store, today=date(2026, 6, 3))
     today = model["sections"]["today"]
-    assert [item["title"] for item in today] == ["제3회 demo-study"]
+    assert [item["title"] for item in today] == ["제3회 ai-study"]
     assert today[0]["urgency_label"] == ""
-    assert today[0]["children"][0]["title"] == "제3회 demo-study 일정 결정"
-    assert today[0]["children"][1]["title"] == "3회 demo-study 후속자료·완료보고서 메일 발송"
+    assert today[0]["children"][0]["title"] == "제3회 ai-study 일정 결정"
+    assert today[0]["children"][1]["title"] == "3회 ai-study 후속자료·완료보고서 메일 발송"
 
     briefing = build_morning_briefing(store, now=datetime(2026, 6, 3, 9, 30), actor_id="me", reserve=False)[0]
-    assert "- 제3회 demo-study — 하위작업 중심으로 확인합니다." in briefing.text
-    assert "3회 demo-study 후속자료·완료보고서 메일 발송" in briefing.text
+    assert "- 제3회 ai-study — 하위작업 중심으로 확인합니다." in briefing.text
+    assert "3회 ai-study 후속자료·완료보고서 메일 발송" in briefing.text
     assert "일정 지남 · 결과 확인 필요" not in briefing.text
 
 
 def test_existing_backfill_rehomes_followups_without_weak_cross_workflow_matches(tmp_path: Path) -> None:
     store = _store(tmp_path)
     root = replace(
-        _proposal("proposal/review", "demo-study 발표자료 리뷰 논의", status="approved"),
+        _proposal("proposal/review", "ai-study 발표자료 리뷰 논의", status="approved"),
         kind="event",
         scheduled_date=date(2026, 5, 28),
         time_window="10:00",
         metadata={"progress_status": "scheduled_for_13_00_to_13_30"},
     )
     decision_child = replace(
-        _proposal("proposal/date-decision", "제3회 demo-study 일정 결정", status="done"),
+        _proposal("proposal/date-decision", "제3회 ai-study 일정 결정", status="done"),
         kind="event",
         scheduled_date=date(2026, 6, 2),
         time_window="14:00",
@@ -428,7 +660,7 @@ def test_existing_backfill_rehomes_followups_without_weak_cross_workflow_matches
     )
     followup = _proposal(
         "proposal/followup",
-        "3회 demo-study 후속자료·완료보고서 메일 발송",
+        "3회 ai-study 후속자료·완료보고서 메일 발송",
         status="awaiting_approval",
         due_date=date(2026, 6, 3),
         metadata={
@@ -453,7 +685,7 @@ def test_existing_backfill_rehomes_followups_without_weak_cross_workflow_matches
     )
     unrelated_followup = _proposal(
         "proposal/unrelated",
-        "Example Partner 담당자 후속 논의 안건 정리",
+        "KEA 담당자 후속 논의 안건 정리",
         status="approved",
         due_date=date(2026, 6, 4),
     )
@@ -464,9 +696,9 @@ def test_existing_backfill_rehomes_followups_without_weak_cross_workflow_matches
     updates = {proposal.proposal_id: proposal for proposal in normalized.updated_existing}
 
     promoted = updates[root.proposal_id]
-    assert promoted.title == "제3회 demo-study"
+    assert promoted.title == "제3회 ai-study"
     assert promoted.metadata["workflow_container"] == "true"
-    assert promoted.metadata["workflow_original_title"] == "demo-study 발표자료 리뷰 논의"
+    assert promoted.metadata["workflow_original_title"] == "ai-study 발표자료 리뷰 논의"
 
     rehomed = updates[followup.proposal_id]
     assert rehomed.metadata["parent_proposal_id"] == root.proposal_id
@@ -478,16 +710,103 @@ def test_existing_backfill_rehomes_followups_without_weak_cross_workflow_matches
     assert unrelated_followup.proposal_id not in updates
 
 
+def test_existing_backfill_merges_same_title_task_event_commitment(tmp_path: Path) -> None:
+    task = _proposal(
+        "proposal/next-week-progress",
+        "차주 expression_db 회의·exDB/KEA 미팅",
+        status="approved",
+        due_date=date(2026, 6, 5),
+    )
+    task = replace(task, time_window="10:00")
+    event = replace(
+        _proposal(
+            "proposal/next-week-meeting",
+            "차주 expression_db 회의·exDB/KEA 미팅",
+            status="approved",
+        ),
+        kind="event",
+        due_date=None,
+        scheduled_date=date(2026, 6, 5),
+        time_window="10:00",
+    )
+
+    normalized = normalize_existing_proposal_graph((task, event), normalized_at=datetime(2026, 6, 8, 9, 0))
+    updates = {proposal.proposal_id: proposal for proposal in normalized.updated_existing}
+
+    canonical = updates[event.proposal_id]
+    duplicate = updates[task.proposal_id]
+    assert canonical.status == "approved"
+    assert canonical.metadata["merged_duplicate_proposal_ids"] == task.proposal_id
+    assert duplicate.status == "rejected"
+    assert duplicate.metadata["merged_into_proposal_id"] == event.proposal_id
+    assert duplicate.metadata["merged_original_status"] == "approved"
+
+    store = _store(tmp_path)
+    store.save_proposal(canonical)
+    store.save_proposal(duplicate)
+    model = build_web_task_page_model(store, today=date(2026, 6, 8))
+    today_titles = [item["title"] for item in model["sections"]["today"]]
+    assert today_titles == ["차주 expression_db 회의·exDB/KEA 미팅"]
+
+
+def test_new_duplicate_event_merges_existing_due_task(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    existing = _proposal(
+        "proposal/next-week-progress",
+        "차주 expression_db 회의·exDB/KEA 미팅",
+        status="approved",
+        due_date=date(2026, 6, 5),
+    )
+    store.save_proposal(replace(existing, time_window="10:00"))
+    event_draft = ProposalDraft(
+        source_key="proposal/next-week-meeting",
+        raw_text="차주 expression_db 회의·exDB/KEA 미팅",
+        title="차주 expression_db 회의·exDB/KEA 미팅",
+        discussion_id="slack/DTEST",
+        message_id="slack/DTEST/new",
+        line_number=1,
+        speaker="me",
+        assigned_to="me",
+        task_management_area="work",
+        scheduled_date=date(2026, 6, 5),
+        time_window="10:00",
+        item_type="event",
+        metadata={"participants": "me", "external_participants": "최지인 선생님", "location_optional": "true"},
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=StaticDraftAgent((event_draft,))).handle_message(
+        IncomingMessage(
+            message_id="slack/DTEST/new",
+            sender_id="me",
+            chat_id="DTEST",
+            visibility="private",
+            text="next meeting",
+            received_at=datetime(2026, 6, 4, 9, 0),
+        )
+    )
+
+    canonical = store.get_proposal("proposal/next-week-meeting")
+    duplicate = store.get_proposal("proposal/next-week-progress")
+    assert canonical is not None
+    assert duplicate is not None
+    assert canonical.kind == "event"
+    assert canonical.status == "approved"
+    assert duplicate.status == "rejected"
+    assert duplicate.metadata["merged_into_proposal_id"] == canonical.proposal_id
+    assert result.outbound_messages
+    assert result.outbound_messages[0].message_type == "proposal_approved"
+
+
 def test_existing_backfill_links_completion_source_under_workflow_root(tmp_path: Path) -> None:
     store = _store(tmp_path)
     root = replace(
-        _proposal("proposal/review", "demo-study 발표자료 리뷰 논의", status="approved"),
+        _proposal("proposal/review", "ai-study 발표자료 리뷰 논의", status="approved"),
         kind="event",
         scheduled_date=date(2026, 5, 28),
-        metadata={"workflow_role": "parent", "workflow_title": "제3회 demo-study", "workflow_container": "true"},
+        metadata={"workflow_role": "parent", "workflow_title": "제3회 ai-study", "workflow_container": "true"},
     )
     decision_child = replace(
-        _proposal("proposal/date-decision", "제3회 demo-study 일정 결정", status="done"),
+        _proposal("proposal/date-decision", "제3회 ai-study 일정 결정", status="done"),
         kind="event",
         scheduled_date=date(2026, 6, 2),
         time_window="14:00",
@@ -513,7 +832,7 @@ def test_existing_backfill_links_completion_source_under_workflow_root(tmp_path:
     linked = updates[study_done.proposal_id]
     assert linked.metadata["parent_proposal_id"] == root.proposal_id
     assert linked.metadata["depends_on_proposal_ids"] == decision_child.proposal_id
-    assert linked.metadata["workflow_title"] == "제3회 demo-study"
+    assert linked.metadata["workflow_title"] == "제3회 ai-study"
     assert linked.metadata["relation_type"] == "workflow_completion_evidence"
 
 
@@ -524,15 +843,15 @@ def test_existing_backfill_creates_parent_for_dependency_only_workflow_title(tmp
         "이의신청 자료 전달받기",
         status="done",
         due_date=date(2026, 6, 1),
-        metadata={"workflow_title": "demo 이의신청 자료 업로드", "completed_at": "2026-06-01T16:09:01"},
+        metadata={"workflow_title": "zeus 이의신청 자료 업로드", "completed_at": "2026-06-01T16:09:01"},
     )
     second = _proposal(
         "proposal/upload",
-        "demo 이의신청 자료 업로드",
+        "zeus 이의신청 자료 업로드",
         status="done",
         due_date=date(2026, 6, 1),
         metadata={
-            "workflow_title": "demo 이의신청 자료 업로드",
+            "workflow_title": "zeus 이의신청 자료 업로드",
             "depends_on_proposal_ids": first.proposal_id,
             "completed_at": "2026-06-01T16:09:01",
         },
@@ -544,7 +863,7 @@ def test_existing_backfill_creates_parent_for_dependency_only_workflow_title(tmp
 
     assert len(normalized.proposals) == 1
     parent = normalized.proposals[0]
-    assert parent.title == "demo 이의신청 자료 업로드"
+    assert parent.title == "zeus 이의신청 자료 업로드"
     assert parent.status == "done"
     assert parent.metadata["workflow_role"] == "parent"
     assert parent.metadata["workflow_backfill_created"] == "true"

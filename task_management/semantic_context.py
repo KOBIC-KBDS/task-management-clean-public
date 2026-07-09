@@ -1,5 +1,24 @@
 from __future__ import annotations
 
+from .relations import (
+    ATTENDEES_KEY,
+    CONFLICT_DETECTED_KEY,
+    CONFLICT_WITH_PROPOSAL_IDS_KEY,
+    DATE_WINDOW_END_KEY,
+    DATE_WINDOW_LABEL_KEY,
+    DATE_WINDOW_START_KEY,
+    DEFERRED_MISSING_SLOTS_KEY,
+    DEFERRED_UNTIL_KEY,
+    EXTERNAL_PARTICIPANTS_KEY,
+    LINK_TYPE_KEY,
+    LOCATION_KEY,
+    LOCATION_OPTIONAL_KEY,
+    NEEDS_EXACT_TIME_KEY,
+    PARTICIPANTS_KEY,
+    PARTICIPANT_LABEL_KEY,
+    SOURCE_TS_KEY,
+)
+
 from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any, Sequence
@@ -101,6 +120,48 @@ def build_operating_agent_context(
     }
 
 
+def recent_conversation_from_events(
+    events,
+    *,
+    chat_id: str,
+    sender_id: str,
+    current_message: IncomingMessage | None = None,
+    limit: int = 8,
+    max_chars: int = 600,
+) -> tuple[dict, ...]:
+    """Reconstruct recent DM turns (user + bot) from the audit log.
+
+    Gives the semantic agent the prior conversation so it can resolve a reply
+    against context (e.g. an affirmative answer to the bot's own pending
+    question) instead of guessing the target. Pure context, not a rule.
+
+    When ``current_message`` is provided, the matching ``message.received``
+    event is skipped during the scan so the message never contextualizes
+    itself, and the current message is appended as the trailing user turn.
+    """
+
+    exclude_message_id = current_message.message_id if current_message is not None else None
+    turns: list[dict] = []
+    for event in events:
+        etype = event.get("type")
+        payload = event.get("payload") or {}
+        msg = payload.get("message") or {}
+        text = str(msg.get("text") or "").strip()
+        if not text:
+            continue
+        if etype == "message.received" and msg.get("chat_id") == chat_id:
+            if exclude_message_id is not None and msg.get("message_id") == exclude_message_id:
+                continue
+            turns.append({"role": "user", "text": text[:max_chars]})
+        elif etype == "slack.message.sent" and payload.get("recipient_id") == sender_id:
+            turns.append({"role": "assistant", "text": text[:max_chars]})
+    if current_message is not None:
+        current_text = str(current_message.text or "").strip()
+        if current_text:
+            turns.append({"role": "user", "text": current_text[:max_chars]})
+    return tuple(turns[-limit:])
+
+
 def _proposal_card(proposal: Proposal, *, request_ids: tuple[str, ...]) -> dict[str, Any]:
     proposal_date = proposal.scheduled_date or proposal.due_date
     return {
@@ -150,8 +211,8 @@ def _semantic_handles(proposal: Proposal) -> list[str]:
         "risk_level",
         "risk_reason",
         "requires_separate_approval",
-        "conflict_with_proposal_ids",
-        "source_ts",
+        CONFLICT_WITH_PROPOSAL_IDS_KEY,
+        SOURCE_TS_KEY,
     ):
         value = proposal.metadata.get(key)
         if value:
@@ -164,21 +225,21 @@ def _semantic_handles(proposal: Proposal) -> list[str]:
 
 def _important_metadata(metadata: dict[str, str]) -> dict[str, str]:
     important_keys = (
-        "participants",
-        "external_participants",
-        "participant_label",
-        "attendees",
-        "location",
-        "location_optional",
-        "date_window_start",
-        "date_window_end",
-        "date_window_label",
+        PARTICIPANTS_KEY,
+        EXTERNAL_PARTICIPANTS_KEY,
+        PARTICIPANT_LABEL_KEY,
+        ATTENDEES_KEY,
+        LOCATION_KEY,
+        LOCATION_OPTIONAL_KEY,
+        DATE_WINDOW_START_KEY,
+        DATE_WINDOW_END_KEY,
+        DATE_WINDOW_LABEL_KEY,
         "needs_exact_date",
-        "needs_exact_time",
-        "deferred_missing_slots",
-        "deferred_until",
-        "conflict_detected",
-        "conflict_with_proposal_ids",
+        NEEDS_EXACT_TIME_KEY,
+        DEFERRED_MISSING_SLOTS_KEY,
+        DEFERRED_UNTIL_KEY,
+        CONFLICT_DETECTED_KEY,
+        CONFLICT_WITH_PROPOSAL_IDS_KEY,
         "event_scope",
         "blocks_in_person",
         "parent_proposal_id",
@@ -194,7 +255,7 @@ def _important_metadata(metadata: dict[str, str]) -> dict[str, str]:
         "risk_level",
         "risk_reason",
         "requires_separate_approval",
-        "link_type",
+        LINK_TYPE_KEY,
         "internal_owner",
         "external_owner",
         "collaboration_context",

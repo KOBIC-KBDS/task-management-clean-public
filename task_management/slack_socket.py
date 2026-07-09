@@ -6,9 +6,10 @@ from datetime import datetime
 import hashlib
 import json
 import os
+import random
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator, Mapping, Protocol
+from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Protocol
 from urllib import request as urlrequest
 
 from .domain import IncomingMessage, OrchestrationResult, OutboundMessage
@@ -29,6 +30,11 @@ from .store import TeamTaskStore
 
 
 SLACK_SOCKET_APP_SCOPES = ("connections:write",)
+
+# Maximum number of processing attempts for a queued inbound event before it is
+# marked terminally 'failed'. Until the cap is reached a failed event is left
+# 'pending' so the next drain reprocesses it.
+MAX_INBOUND_PROCESS_ATTEMPTS = 5
 
 
 class SlackSocketError(SlackAdapterError):
@@ -220,6 +226,7 @@ async def run_slack_socket_loop(
     max_seconds: float = 0,
     reconnect: bool = True,
     home_dashboard_url: str = "",
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> SlackSocketLoopResult:
     """Run a personal-DM-only Slack Socket Mode loop.
 
@@ -241,9 +248,37 @@ async def run_slack_socket_loop(
     outbound_count = 0
     handled: list[SlackSocketEventResult] = []
     stopped_reason = "max_events"
+    reconnect_attempt = 0
 
     while True:
-        url = client.open_connection(socket_config.app_token)
+        try:
+            url = client.open_connection(socket_config.app_token)
+        except Exception as exc:
+            # apps.connections.open failed (network, ratelimited, invalid token,
+            # ...). Never propagate a raw error or hammer Slack once per second:
+            # emit a connection.error event and fall through to the bounded
+            # exponential-backoff reconnect path below.
+            store.append_event(
+                "slack.socket.connection.error",
+                {
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:500],
+                    "reconnect": reconnect,
+                },
+                occurred_at=datetime.now(),
+            )
+            if max_events and event_count >= max_events:
+                stopped_reason = "max_events"
+                break
+            if max_seconds and (time.monotonic() - started) >= max_seconds:
+                stopped_reason = "max_seconds"
+                break
+            if not reconnect:
+                stopped_reason = "connection_error"
+                break
+            await sleep(_reconnect_delay_seconds(reconnect_attempt))
+            reconnect_attempt += 1
+            continue
         store.append_event(
             "slack.socket.connection.opened",
             {"url_received": bool(url), "client": type(client).__name__},
@@ -279,6 +314,7 @@ async def run_slack_socket_loop(
             envelope_type = str(envelope.get("type") or "")
             if envelope_type == "hello":
                 connected = True
+                reconnect_attempt = 0
                 store.append_event(
                     "slack.socket.connected",
                     {"type": envelope_type, "num_connections": envelope.get("num_connections", "")},
@@ -295,12 +331,30 @@ async def run_slack_socket_loop(
                 break
 
             envelope_id = str(envelope.get("envelope_id") or "")
-            enqueue_slack_socket_envelope(
-                store=store,
-                adapter=adapter,
-                envelope=envelope,
-                received_at=datetime.now(),
-            )
+            try:
+                enqueue_slack_socket_envelope(
+                    store=store,
+                    adapter=adapter,
+                    envelope=envelope,
+                    received_at=datetime.now(),
+                )
+            except Exception as exc:
+                # A store failure (sqlite 'database is locked', append_event IO
+                # error, ...) must not kill the receive loop. Skip the ack so
+                # Slack redelivers the envelope, then move on to the next one.
+                try:
+                    store.append_event(
+                        "slack.socket.enqueue.failed",
+                        {
+                            "envelope_id": envelope_id,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc)[:500],
+                        },
+                        occurred_at=datetime.now(),
+                    )
+                except Exception:
+                    pass
+                continue
             ack_failed = False
             if envelope_id:
                 try:
@@ -378,7 +432,8 @@ async def run_slack_socket_loop(
             break
         if not reconnect:
             break
-        await asyncio.sleep(1.0)
+        await sleep(_reconnect_delay_seconds(reconnect_attempt))
+        reconnect_attempt += 1
 
     store.append_event(
         "slack.socket.loop.stopped",
@@ -456,6 +511,7 @@ def process_slack_socket_inbound_queue(
     results: list[SlackSocketEventResult] = []
     for item in store.list_pending_inbound_events(provider="slack_socket", limit=limit):
         event_id = str(item["event_id"])
+        message_id = str(item["message_id"])
         envelope = item["payload"]
         try:
             event_result = handle_slack_socket_envelope(
@@ -469,19 +525,29 @@ def process_slack_socket_inbound_queue(
                 home_dashboard_url=home_dashboard_url,
             )
         except Exception as exc:
+            attempts = int(item.get("attempts") or 0) + 1
+            retryable = attempts < MAX_INBOUND_PROCESS_ATTEMPTS
             store.mark_inbound_event(
                 event_id,
-                status="failed",
+                status="pending" if retryable else "failed",
                 updated_at=handled_at,
                 last_error=str(exc),
                 increment_attempts=True,
             )
+            if retryable and message_id:
+                # handle_message records the message before its fallible work, so
+                # a mid-processing crash would otherwise leave has_message=True
+                # forever and the retried event would be dropped as a duplicate.
+                # Drop the half-recorded message so the retry reprocesses cleanly.
+                store.delete_message(message_id)
             store.append_event(
                 "slack.socket.event.failed",
                 {
                     "event_id": event_id,
                     "error_type": type(exc).__name__,
                     "error": str(exc)[:500],
+                    "attempts": attempts,
+                    "retryable": retryable,
                 },
                 occurred_at=handled_at,
             )
@@ -576,7 +642,13 @@ def handle_slack_socket_envelope(
     else:
         store.set_integration_state(_watch_last_ts_key(message.chat_id), ts, updated_at=handled_at)
     if send and outbound:
-        queue_slack_outbound(store, adapter, tuple(outbound), queued_at=handled_at)
+        queue_slack_outbound(
+            store,
+            adapter,
+            tuple(outbound),
+            queued_at=handled_at,
+            source_message_id=message.message_id,
+        )
         drain_slack_outbound_queue(store, adapter, sent_at=handled_at)
     if send:
         try:  # mark done: eyes -> white_check_mark, best-effort
@@ -747,6 +819,22 @@ def _remaining_seconds(started: float, max_seconds: float) -> float | None:
     if not max_seconds:
         return None
     return max(0.0, max_seconds - (time.monotonic() - started))
+
+
+def _reconnect_delay_seconds(attempt: int, *, base: float = 1.0, cap: float = 30.0) -> float:
+    """Exponential reconnect backoff with bounded jitter.
+
+    Returns ``min(cap, base * 2**attempt)`` plus a small random jitter, clamped so
+    the total never exceeds ``cap``.  ``attempt`` is the zero-based retry count, so
+    attempt 0 waits ~base seconds and the delay roughly doubles each retry until it
+    saturates at ``cap``.  Jitter spreads simultaneous reconnects to avoid a
+    thundering herd against apps.connections.open.
+    """
+
+    safe_attempt = max(0, attempt)
+    backoff = min(cap, base * (2 ** safe_attempt))
+    jitter = random.uniform(0.0, min(base, cap))
+    return min(cap, backoff + jitter)
 
 
 def _is_allowlisted_notification_event(

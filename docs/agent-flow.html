@@ -8,39 +8,21 @@ header{background:linear-gradient(135deg,var(--navy),var(--blue));color:white;pa
 main{max-width:1180px;margin:0 auto;padding:24px 24px 64px}h1,h2,h3{letter-spacing:-.025em}h2{border-top:1px solid var(--line);padding-top:24px;margin-top:30px}h3{margin-top:24px}
 a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}code{background:#f1f5f9;border:1px solid #dbe3ef;border-radius:6px;padding:1px 5px;font-size:.92em}
 pre{white-space:pre-wrap;overflow:auto;background:#0b1020;color:#e6edf3;border-radius:14px;padding:14px;font-size:13px;line-height:1.5}.mermaid{background:#fff;color:#111827;border:1px solid var(--line)}
-ul{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14px 24px}li{margin:5px 0}.numbered{counter-reset:item}.numbered li{list-style:none}.numbered li:before{counter-increment:item;content:counter(item) '. ';font-weight:800;color:var(--blue)}
+ul,ol{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14px 28px}li{margin:5px 0}.numbered{counter-reset:item}.numbered li{list-style:none}.numbered li:before{counter-increment:item;content:counter(item) '. ';font-weight:800;color:var(--blue)}
 .table-wrap{overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:16px;margin:16px 0}table{border-collapse:collapse;width:100%;min-width:920px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid #e5e7eb;padding:10px 12px}th{background:#f8fafc;color:#334155}tr:last-child td{border-bottom:0}
-</style></head><body><header><h1>Agent Flow Overview</h1><p>Current semantic-agent, workflow-normalizer, and human-surface flow.</p></header><main><h1 id="agent-flow-overview">Agent Flow Overview</h1>
-<p>This document is the curated runtime map for the clean public task-management repository. It explains where a semantic CLI agent intervenes, where deterministic code takes over, and how the current workflow/hierarchy rules reshape tasks after the agent returns a decision.</p>
-<p>For a rendered version of this document, open <a href="agent-flow.html"><code>docs/agent-flow.html</code></a>. For a playable animation, open <a href="agent-flow-demo/index.html"><code>docs/agent-flow-demo/index.html</code></a>. For static code inventory evidence, start at <a href="codeboarding/README.md"><code>docs/codeboarding/README.md</code></a>. This page is different: it is the operator-facing control-flow and policy map.</p>
-<h2 id="current-one-line-model">Current one-line model</h2>
-<p>Slack or a local fixture delivers a message; Codex or Claude Code interprets intent; deterministic orchestration validates the strict decision envelope, normalizes workflow hierarchy, persists local state, renders human views, and optionally builds a task-core preview payload.</p>
-<pre><code>Slack event / local transcript
+
+</style></head><body><header><h1>Agent Flow Overview</h1><p>Current semantic-agent, workflow-normalizer, and human-surface flow.</p></header><main><h1 id="agent-flow-overview">Agent Flow Overview</h1><p>This document is the curated runtime map for the clean public task-management repository. It explains where a semantic CLI agent intervenes, where deterministic code takes over, and how the current workflow/hierarchy rules reshape tasks after the agent returns a decision.</p><p>For a rendered version of this document, open <a href="agent-flow.html"><code>docs/agent-flow.html</code></a>. For a playable animation, open <a href="agent-flow-demo/index.html"><code>docs/agent-flow-demo/index.html</code></a>. For static code inventory evidence, start at <a href="codeboarding/README.md"><code>docs/codeboarding/README.md</code></a>. For cross-agent refactoring handoffs, read and update <a href="shared-context.md"><code>docs/shared-context.md</code></a>. This page is different: it is the operator-facing control-flow and policy map.</p><h2 id="current-one-line-model">Current one-line model</h2><p>Slack or a local fixture delivers a message; Codex or Claude Code interprets intent; deterministic orchestration validates the strict decision envelope, normalizes workflow hierarchy, persists local state, renders human views, and optionally builds a task-core preview payload.</p><pre>Slack event / local transcript
   -&gt; CLI loop or fixture command
   -&gt; Slack adapter normalizes IncomingMessage
-  -&gt; Orchestrator loads proposal, approval, relation, timeline, and audit context
+  -&gt; ProposalIntake and orchestrator load proposal, approval, relation, timeline, and audit context
   -&gt; Codex / Claude / OpenAI operating agent returns a strict decision envelope
-  -&gt; Deterministic validation, approval, conflict, and slot policy
-  -&gt; Workflow graph normalizer repairs parent/root/dependency structure
+  -&gt; SemanticPatchService plus deterministic validation, approval, conflict, and slot policy
+  -&gt; WorkflowBatch and graph normalizer repair parent/root/dependency structure
   -&gt; Local SQLite state plus JSONL audit events
-  -&gt; Slack reply, Slack Home, briefings, web dashboard, task-core preview</code></pre>
-<h2 id="what-changed-in-the-current-flow">What changed in the current flow</h2>
-<p>The older flow treated the semantic decision as mostly create/update followed by policy and persistence. The current flow has additional deterministic structure around workflow lifecycles:</p>
-<ul class="numbered">
-<li><strong>Stable workflow root.</strong> Study, meeting, event, and review lifecycles should converge on a broad workflow root for the actual named event, not a narrow planning step such as a schedule decision or prep discussion.</li>
-<li><strong>New-input normalization.</strong> After the operating agent proposes a new item, <code>normalize_new_proposal_graph(...)</code> can promote an existing planning parent into a workflow root and reparent post-event deliverables under that root before persistence.</li>
-<li><strong>Workflow backfill.</strong> Existing state can be repaired with <code>workflow-backfill-preview</code> and <code>workflow-backfill-apply</code>; the apply path checkpoints state first and writes audit events for created or updated workflow graph items.</li>
-<li><strong>Linked completion.</strong> When a semantic completion update closes one scheduled event, related scheduled commitments in the same slot can be completed and linked as completion evidence.</li>
-<li><strong>Surface rollup.</strong> Slack Home, briefings, and the web dashboard anchor child items under workflow context parents, suppress parent-only dates/overdue flags, show only the two most recent completed children, and show hidden-completed counts.</li>
-<li><strong>Outbound dedupe audit.</strong> Duplicate outbound Slack cards are skipped through stable dedupe keys and now emit an explicit <code>slack.message.skipped</code> audit event with reason <code>duplicate_dedupe_key</code>.</li>
-</ul>
-<h2 id="runtime-intervention-points">Runtime intervention points</h2>
-<div class="table-wrap"><table><thead><tr><th>Stage</th><th>Main files</th><th>Who decides?</th><th>Current behavior</th></tr></thead><tbody><tr><td>Intake</td><td><code>task_management/cli.py</code>, <code>task_management/slack_socket.py</code>, <code>task_management/slack_adapter.py</code></td><td>Deterministic adapter</td><td>Socket Mode, polling, fixture, and CLI commands become <code>IncomingMessage</code> objects. Outbound Slack send/queue paths use stable dedupe keys.</td></tr><tr><td>Context assembly</td><td><code>task_management/orchestrator.py</code>, <code>task_management/semantic_context.py</code>, <code>task_management/store.py</code></td><td>Deterministic code</td><td>The orchestrator loads active proposals, pending approvals, relations, recent audit evidence, and current workflow context.</td></tr><tr><td>Semantic decision</td><td><code>task_management/codex_operating_agent.py</code>, <code>task_management/claude_code_operating_agent.py</code>, <code>task_management/openai_operating_agent.py</code>, <code>task_management/operating_agent_prompt.py</code></td><td>Codex / Claude / OpenAI semantic agent</td><td>The agent classifies no-action vs create vs update vs clarification, chooses semantic target candidates, and returns a strict JSON envelope. It is explicitly instructed to prefer stable workflow roots for event lifecycles.</td></tr><tr><td>Envelope and policy gate</td><td><code>task_management/orchestrator.py</code>, <code>task_management/approval_policy.py</code>, <code>task_management/slot_validator.py</code>, <code>task_management/conflict_policy.py</code></td><td>Deterministic code</td><td>Invalid decisions are refused; missing slots, approval requirements, risky auto-approval, and conflicts are handled before state changes.</td></tr><tr><td>Workflow graph normalization</td><td><code>task_management/workflow_normalizer.py</code>, <code>task_management/orchestrator.py</code>, <code>task_management/relations.py</code></td><td>Deterministic code, seeded by semantic evidence</td><td>New drafts and selected existing graphs are normalized around canonical workflow roots, parent/child relations, dependency edges, and linked completion evidence.</td></tr><tr><td>State and history</td><td><code>task_management/store.py</code>, <code>task_management/timeline.py</code>, <code>task_management/backfill_report.py</code></td><td>Deterministic code</td><td>Proposals, approval requests, parent/child metadata, dependencies, timeline entries, outbound deliveries, and audit JSONL events are stored locally.</td></tr><tr><td>Human surfaces</td><td><code>task_management/slack_home.py</code>, <code>task_management/secretary.py</code>, <code>task_management/frontend.py</code>, <code>task_management/human_view.py</code>, <code>task_management/work_item_state.py</code></td><td>Deterministic renderer</td><td>Slack replies, Slack Home, morning/afternoon/EOD briefings, and dashboard pages render hierarchy-aware work items with overdue sorting and compact completed-child display.</td></tr><tr><td>External preview</td><td><code>task_management/task_core_bridge.py</code></td><td>Deterministic bridge</td><td>The repo builds and validates preview-only <code>task-core.export.v1</code> payloads. It does not write task-core inbox/raw/wiki state.</td></tr></tbody></table></div>
-<h2 id="end-to-end-message-flow">End-to-end message flow</h2>
-<pre class="mermaid">flowchart TD
+  -&gt; OutboundDelivery, Slack Home, briefings, web dashboard, task-core preview</pre><h2 id="what-changed-in-the-current-flow">What changed in the current flow</h2><p>The older flow treated the semantic decision as mostly create/update followed by policy and persistence. The current flow has additional deterministic structure around workflow lifecycles:</p><ol class="numbered"><li><strong>Thin orchestrator, focused services.</strong> The main orchestrator now delegates proposal intake, semantic patch application, approval transitions, workflow batch handling, completion linking, outbound delivery, source/channel reference handling, and time parsing to focused modules instead of carrying those responsibilities inline.</li><li><strong>Stable workflow root.</strong> Study, meeting, event, and review lifecycles should converge on a broad workflow root for the actual named event, not a narrow planning step such as a schedule decision or prep discussion.</li><li><strong>New-input normalization.</strong> After the operating agent proposes a new item, <code>normalize_new_proposal_graph(...)</code> can promote an existing planning parent into a workflow root and reparent post-event deliverables under that root before persistence.</li><li><strong>Workflow backfill.</strong> Existing state can be repaired with <code>workflow-backfill-preview</code> and <code>workflow-backfill-apply</code>; the apply path checkpoints state first and writes audit events for created or updated workflow graph items.</li><li><strong>Linked completion.</strong> When a semantic completion update closes one scheduled event, related scheduled commitments in the same slot can be completed and linked as completion evidence.</li><li><strong>Surface rollup.</strong> Slack Home, briefings, and the web dashboard anchor child items under workflow context parents, suppress parent-only dates/overdue flags, show only the two most recent completed children, and show hidden-completed counts.</li><li><strong>Outbound dedupe audit.</strong> Duplicate outbound Slack cards are skipped through stable dedupe keys and now emit an explicit <code>slack.message.skipped</code> audit event with reason <code>duplicate_dedupe_key</code>.</li><li><strong>Task/event commitment collapse.</strong> If the same commitment is represented twice as a task and an event with the same normalized title, date, and time window, the normalizer keeps one canonical visible proposal and marks the duplicate as a rejected merge record with <code>merged_into_proposal_id</code>.</li><li><strong>Rejected-work surface boundary.</strong> Rejected proposals remain in audit/status counts, but a shared <code>is_surface_visible_item(...)</code> gate keeps them out of current schedules, pending confirmation cards, hierarchy children, Slack digests, Home, briefings, monthly pages, and the web dashboard.</li><li><strong>Terminal completion with unresolved slots.</strong> A semantic completion update can close an item even when the date or time was never resolved. If the completion is scoped to a pending request, the request is closed first and then the target proposal is marked done.</li><li><strong>Pending-card hijack protection.</strong> A lone pending clarification no longer owns every later private message. The deterministic layer accepts explicit rejections, checks semantic target evidence, and reroutes unrelated meeting-like patches through new-work intake.</li><li><strong>Provider-generic outbound path.</strong> Renderers create <code>OutboundMessage</code> objects; <code>outbound_delivery.py</code> handles queue/send/dedupe flow behind a provider transport so Slack remains a thin wrapper rather than the architecture center.</li><li><strong>Runtime resilience.</strong> Socket reconnect backoff, fast-cycle guards, deferred reminder ticking, and transient Slack send retries keep clean deployments closer to the live operating shape without committing live state.</li><li><strong>Shared engineering memory.</strong> Refactoring handoffs should update <code>docs/shared-context.md</code> with public-safe decisions, verification, and watchpoints so Codex, Claude Code, and human maintainers share the same current context.</li></ol><h2 id="runtime-intervention-points">Runtime intervention points</h2><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Main files</th><th>Who decides?</th><th>Current behavior</th></tr></thead><tbody><tr><td>Intake</td><td><code>task_management/cli.py</code>, <code>task_management/slack_socket.py</code>, <code>task_management/slack_adapter.py</code>, <code>task_management/channels.py</code>, <code>task_management/source_refs.py</code></td><td>Deterministic adapter</td><td>Socket Mode, polling, fixture, and CLI commands become <code>IncomingMessage</code> objects. Channel-specific id and source-reference semantics are centralized before persistence or dedupe.</td></tr><tr><td>Context assembly</td><td><code>task_management/orchestrator.py</code>, <code>task_management/proposal_intake.py</code>, <code>task_management/semantic_context.py</code>, <code>task_management/store.py</code></td><td>Deterministic code</td><td>The orchestrator remains a coordinator while proposal intake and context assembly load active proposals, pending approvals, relations, recent audit evidence, and current workflow context.</td></tr><tr><td>Semantic decision</td><td><code>task_management/codex_operating_agent.py</code>, <code>task_management/claude_code_operating_agent.py</code>, <code>task_management/openai_operating_agent.py</code>, <code>task_management/operating_agent_prompt.py</code></td><td>Codex / Claude / OpenAI semantic agent</td><td>The agent classifies no-action vs create vs update vs clarification, chooses semantic target candidates, and returns a strict JSON envelope. It is explicitly instructed to prefer stable workflow roots for event lifecycles.</td></tr><tr><td>Envelope and policy gate</td><td><code>task_management/semantic_patch_service.py</code>, <code>task_management/approval_flow.py</code>, <code>task_management/approval_policy.py</code>, <code>task_management/slot_validator.py</code>, <code>task_management/conflict_policy.py</code>, <code>task_management/feedback_scoring.py</code></td><td>Deterministic code</td><td>Invalid decisions are refused; target evidence, missing slots, approval requirements, risky auto-approval, and conflicts are handled before state changes. Explicit semantic rejection patches close approvals; low-evidence unrelated patches are rerouted as new work.</td></tr><tr><td>Workflow graph normalization</td><td><code>task_management/workflow_normalizer.py</code>, <code>task_management/workflow_batch.py</code>, <code>task_management/relations.py</code>, <code>task_management/completion_linker.py</code>, <code>task_management/prep_subtasks.py</code></td><td>Deterministic code, seeded by semantic evidence</td><td>New drafts and selected existing graphs are normalized around canonical workflow roots, parent/child relations, dependency edges, linked completion evidence, prep subtasks, and task/event duplicate commitments.</td></tr><tr><td>State and history</td><td><code>task_management/store.py</code>, <code>task_management/timeline.py</code>, <code>task_management/backfill_report.py</code></td><td>Deterministic code</td><td>Proposals, approval requests, parent/child metadata, dependencies, timeline entries, outbound deliveries, and audit JSONL events are stored locally.</td></tr><tr><td>Human surfaces</td><td><code>task_management/slack_home.py</code>, <code>task_management/secretary.py</code>, <code>task_management/frontend.py</code>, <code>task_management/human_view.py</code>, <code>task_management/hierarchy_view.py</code>, <code>task_management/work_item_state.py</code>, <code>task_management/sort_keys.py</code>, <code>task_management/korean_time.py</code></td><td>Deterministic renderer</td><td>Slack replies, Slack Home, morning/afternoon/EOD briefings, and dashboard pages render hierarchy-aware work items with overdue sorting, shared Korean time parsing, and compact completed-child display.</td></tr><tr><td>Outbound delivery</td><td><code>task_management/outbound_delivery.py</code>, <code>task_management/slack_adapter.py</code>, <code>task_management/chat_adapter.py</code></td><td>Deterministic provider wrapper</td><td>Queue, send, retry, failure audit, provider message id capture, and dedupe are handled through a transport seam; Slack remains one provider implementation.</td></tr><tr><td>External preview</td><td><code>task_management/task_core_bridge.py</code></td><td>Deterministic bridge</td><td>The repo builds and validates preview-only <code>task-core.export.v1</code> payloads. It does not write task-core inbox/raw/wiki state.</td></tr></tbody></table></div><h2 id="end-to-end-message-flow">End-to-end message flow</h2><pre class="mermaid">flowchart TD
   A[Slack event or local transcript] --&gt; B[CLI loop / fixture command]
   B --&gt; C[Slack adapter builds IncomingMessage]
-  C --&gt; D[Orchestrator loads active context]
+  C --&gt; D[ProposalIntake loads active context]
   D --&gt; E{Semantic operating agent}
   E --&gt;|codex exec login session| F[Codex backend]
   E --&gt;|claude -p login session| G[Claude Code backend]
@@ -49,17 +31,15 @@ ul{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14
   G --&gt; I
   H --&gt; I
   I --&gt; J[Envelope validation]
-  J --&gt; K[Approval / slot / conflict policy]
-  K --&gt; L[Workflow graph normalization]
+  J --&gt; K[SemanticPatchService + approval / slot / conflict policy]
+  K --&gt; L[WorkflowBatch + graph normalization]
   L --&gt; M[(Local SQLite state)]
   L --&gt; N[JSONL audit events]
-  M --&gt; O[Slack reply queue]
+  M --&gt; O[OutboundDelivery queue]
   M --&gt; P[Slack Home]
   M --&gt; Q[Briefings]
   M --&gt; R[Web dashboard]
-  M --&gt; S[task-core preview]</pre>
-<h2 id="new-input-hierarchy-flow">New input hierarchy flow</h2>
-<pre class="mermaid">flowchart TD
+  M --&gt; S[task-core preview]</pre><h2 id="new-input-hierarchy-flow">New input hierarchy flow</h2><pre class="mermaid">flowchart TD
   A[Incoming message] --&gt; B[Operating agent decision]
   B --&gt; C{Drafts contain work items?}
   C --&gt;|No| D[No action / clarification / direct reply]
@@ -71,13 +51,29 @@ ul{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14
   I --&gt; J[Reparent follow-up deliverables under root]
   J --&gt; K[Preserve completed decision as dependency]
   H --&gt;|No| L[Keep standalone proposal shape]
-  K --&gt; M[Approval / conflict policy]
-  L --&gt; M
-  M --&gt; N[Persist proposals and audit events]</pre>
-<h3 id="practical-interpretation">Practical interpretation</h3>
-<p>If a narrow item such as a review discussion or schedule decision later turns out to be part of a broader named event, the broad event becomes the anchor. Follow-up materials, reports, minutes, result sharing, and outbound email attach to that workflow root or nearest active workflow ancestor. Completed planning or schedule-decision items remain visible as completed dependencies, not as the parent of later post-event deliverables.</p>
-<h2 id="existing-state-backfill-flow">Existing-state backfill flow</h2>
-<pre class="mermaid">flowchart TD
+  K --&gt; X{Same title/date/time task-event duplicate?}
+  L --&gt; X
+  X --&gt;|Yes| Y[Keep canonical proposal and reject merged duplicate]
+  X --&gt;|No| M[Approval / conflict policy]
+  Y --&gt; M
+  M --&gt; N[Persist proposals and audit events]</pre><h2 id="semantic-target-safety-flow">Semantic target safety flow</h2><pre class="mermaid">flowchart TD
+  A[Incoming message with pending approvals] --&gt; B[Semantic agent returns patch]
+  B --&gt; C{Patch is explicit approval rejection?}
+  C --&gt;|Yes| D[Close approval request and proposal as rejected]
+  C --&gt;|No| T{Patch is terminal completion?}
+  T --&gt;|Yes| U[Close pending request if present and mark target done]
+  T --&gt;|No| E{Target confidence and evidence pass?}
+  E --&gt;|No| F[Reject patch without mutating target]
+  E --&gt;|Yes| G{Looks like unrelated new work?}
+  G --&gt;|No| H[Apply feedback to target]
+  G --&gt;|Yes| I[Audit target_mismatch_new_work]
+  I --&gt; J[Run new-work intake without pending request pressure]
+  J --&gt; K[Create standalone task/event if parser finds one]
+  D --&gt; L[Render surfaces without missing-slot pressure]
+  U --&gt; L
+  F --&gt; L
+  H --&gt; L
+  K --&gt; L</pre><p>Practical interpretation:</p><ul><li>A reply such as <code>reject approval/...</code> or a semantic <code>status=rejected</code> patch is a terminal approval decision, not an unsupported status update.</li><li>A completion patch is also terminal: it can close a pending request and mark the target done even when the original item was missing a date or time.</li><li>A message with a concrete time/place and meeting-like wording must not mutate an unrelated pending question unless it also carries credible target evidence.</li><li>If the semantic agent over-targets the pending card, deterministic code records the mismatch and gives the same message a second chance as a new item.</li><li>Rejected proposals are audit records, not active work: they stay available for counts/history but do not render as current schedule items, pending cards, or hierarchy children.</li><li>Rejected and done proposals are excluded from task-core preview readiness rather than appearing as blocked work.</li><li>Plain <code>question</code> proposals do not need dates unless the source item explicitly asks for exact-date resolution.</li></ul><h3 id="practical-interpretation">Practical interpretation</h3><p>If a narrow item such as a review discussion or schedule decision later turns out to be part of a broader named event, the broad event becomes the anchor. Follow-up materials, reports, minutes, result sharing, and outbound email attach to that workflow root or nearest active workflow ancestor. Completed planning or schedule-decision items remain visible as completed dependencies, not as the parent of later post-event deliverables.</p><h2 id="existing-state-backfill-flow">Existing-state backfill flow</h2><pre class="mermaid">flowchart TD
   A[Existing proposals] --&gt; B[workflow-backfill-preview]
   B --&gt; C[Read-only report]
   C --&gt; D{Operator applies?}
@@ -88,13 +84,25 @@ ul{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14
   H --&gt; I[Create synthetic workflow containers when safe]
   H --&gt; J[Repair parent/dependency metadata]
   H --&gt; K[Link completion sources]
+  H --&gt; X[Collapse same-slot task/event duplicates]
   I --&gt; L[Persist created/updated proposals]
   J --&gt; L
   K --&gt; L
-  L --&gt; M[workflow.backfill.* audit events]</pre>
-<p>Backfill is deliberately more conservative than new-input normalization. It repairs already-linked workflow subtrees, canonical event roots, multi-parent metadata, dependency-only workflow containers, and linked completion evidence. It should not sweep unrelated historical tasks under a workflow based only on weak keyword overlap.</p>
-<h2 id="completion-and-linked-scheduled-commitments">Completion and linked scheduled commitments</h2>
-<pre class="mermaid">sequenceDiagram
+  X --&gt; L
+  L --&gt; M[workflow.backfill.* audit events]</pre><p>Backfill is deliberately more conservative than new-input normalization. It repairs already-linked workflow subtrees, canonical event roots, multi-parent metadata, dependency-only workflow containers, and linked completion evidence. It should not sweep unrelated historical tasks under a workflow based only on weak keyword overlap.</p><h2 id="task-event-duplicate-commitment-collapse">Task/event duplicate commitment collapse</h2><pre class="mermaid">flowchart TD
+  A[Candidate proposal] --&gt; B{Kind is task or event?}
+  B --&gt;|No| C[Leave unchanged]
+  B --&gt;|Yes| D{Has title, commitment date, and time window?}
+  D --&gt;|No| C
+  D --&gt;|Yes| E[Normalize title and time window]
+  E --&gt; F{Task/event pair matches same title/date/time?}
+  F --&gt;|No| C
+  F --&gt;|Yes| G[Rank canonical proposal]
+  G --&gt; H[Prefer scheduled event, approved/applied state, latest update]
+  H --&gt; I[Keep canonical visible]
+  H --&gt; J[Mark duplicate rejected with merged_into_proposal_id]
+  I --&gt; K[Store merged_duplicate_proposal_ids]
+  J --&gt; L[Preserve original status/kind/date/time in metadata]</pre><p>This rule is intentionally narrow. It does not merge arbitrary similarly named work. It only collapses a visible duplicate when one proposal is a task, the other is an event, and both point to the same normalized title, same date, and same non-empty time window. New-input normalization runs this check before approval/outbound handling so a duplicate incoming proposal is stored as audit history instead of creating another approval card. Existing-state backfill runs the same check so old task/event splits converge to the same single visible commitment model.</p><h2 id="completion-and-linked-scheduled-commitments">Completion and linked scheduled commitments</h2><pre class="mermaid">sequenceDiagram
   participant User
   participant Agent as Semantic agent
   participant Orch as Orchestrator
@@ -107,9 +115,7 @@ ul{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14
   Orch-&gt;&gt;Orch: Find same-slot scheduled commitments with related completion signal
   Orch-&gt;&gt;Store: Mark related commitments done with linked completion metadata
   Store--&gt;&gt;Normalizer: Future backfill can rehome linked completion sources
-  Store--&gt;&gt;User: Direct update / refreshed surfaces</pre>
-<h2 id="human-surface-rendering-flow">Human surface rendering flow</h2>
-<pre class="mermaid">flowchart TD
+  Store--&gt;&gt;User: Direct update / refreshed surfaces</pre><h2 id="human-surface-rendering-flow">Human surface rendering flow</h2><pre class="mermaid">flowchart TD
   A[(Local proposals)] --&gt; B[Build hierarchy projection]
   B --&gt; C[Find section anchor]
   C --&gt; D{Parent is workflow context?}
@@ -120,18 +126,7 @@ ul{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14
   G --&gt; H
   H --&gt; I[Keep active children plus two newest completed children]
   I --&gt; J[Show hidden completed count]
-  J --&gt; K[Slack Home / briefing / dashboard]</pre>
-<p>Surface rules are intentionally consistent across Slack Home, proactive briefings, and the web dashboard:</p>
-<ul>
-<li>Active children stay visible.</li>
-<li>Completed children are shown with strikethrough-style titles where the surface supports it.</li>
-<li>Only the two most recent completed children are shown under a workflow parent.</li>
-<li>Older completed children are counted as hidden rather than expanding the current-work view.</li>
-<li>Parent workflow containers are context anchors, so their own date/time/overdue labels are suppressed when children exist.</li>
-<li>Current work sorts by deadline, with overdue work moved behind non-overdue same-section work where supported.</li>
-</ul>
-<h2 id="outbound-slack-and-dedupe-flow">Outbound Slack and dedupe flow</h2>
-<pre class="mermaid">flowchart TD
+  J --&gt; K[Slack Home / briefing / dashboard]</pre><p>Surface rules are intentionally consistent across Slack Home, proactive briefings, and the web dashboard:</p><ul><li>Active children stay visible.</li><li>Completed children are shown with strikethrough-style titles where the surface supports it.</li><li>Only the two most recent completed children are shown under a workflow parent.</li><li>Older completed children are counted as hidden rather than expanding the current-work view.</li><li>Parent workflow containers are context anchors, so their own date/time/overdue labels are suppressed when children exist.</li><li>Current work sorts by deadline, with overdue work moved behind non-overdue same-section work where supported.</li><li>Rejected items are suppressed from current-work sections and child rollups even if they still contribute to audit/status summaries.</li></ul><h2 id="outbound-slack-and-dedupe-flow">Outbound Slack and dedupe flow</h2><pre class="mermaid">flowchart TD
   A[Renderer creates outbound message] --&gt; B[Compute explicit or derived dedupe key]
   B --&gt; C{Already delivered?}
   C --&gt;|Yes| D[Skip queue]
@@ -139,27 +134,7 @@ ul{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14
   C --&gt;|No| F[Queue outbound message]
   F --&gt; G[Audit slack.message.queued]
   G --&gt; H[Send worker posts to Slack]
-  H --&gt; I[Mark delivery sent or failed]</pre>
-<p>Dry-run briefing commands do not consume dedupe keys. <code>morning-briefing</code> and <code>afternoon-briefing</code> also support a force path that appends a unique suffix when the operator deliberately wants to resend a briefing.</p>
-<h2 id="agent-contract">Agent contract</h2>
-<p>The semantic agent should answer these questions and return them through the strict schema rather than free-form prose:</p>
-<ul>
-<li>Is the message no-action, a new work item, an update, a completion, a clarification answer, or a user-facing question?</li>
-<li>Which existing proposal or workflow root is the best semantic target?</li>
-<li>If this is a study, meeting, event, or review lifecycle, what is the stable workflow root?</li>
-<li>Is the item a parent workflow, child step, dependency, post-event deliverable, or completion evidence?</li>
-<li>Which slots are known, missing, deferred, or risky to auto-approve?</li>
-<li>What evidence text and confidence support the decision?</li>
-</ul>
-<p>The deterministic layer then decides whether the envelope is valid, whether approval is required, whether hierarchy should be normalized, and what should be persisted.</p>
-<h2 id="backend-choices">Backend choices</h2>
-<p>Clean installs can use a local CLI login session instead of committed API keys.</p>
-<pre><code>$env:TASK_MANAGEMENT_OPERATING_AGENT = &quot;codex&quot;
-$env:TASK_MANAGEMENT_CODEX_MODEL = &quot;gpt-5.5&quot;</code></pre>
-<p>or:</p>
-<pre><code>$env:TASK_MANAGEMENT_OPERATING_AGENT = &quot;claude&quot;
+  H --&gt; I[Mark delivery sent or failed]</pre><p>Dry-run briefing commands do not consume dedupe keys. <code>morning-briefing</code> and <code>afternoon-briefing</code> also support a force path that appends a unique suffix when the operator deliberately wants to resend a briefing.</p><h2 id="agent-contract">Agent contract</h2><p>The semantic agent should answer these questions and return them through the strict schema rather than free-form prose:</p><ul><li>Is the message no-action, a new work item, an update, a completion, a clarification answer, or a user-facing question?</li><li>Which existing proposal or workflow root is the best semantic target?</li><li>If this is a study, meeting, event, or review lifecycle, what is the stable workflow root?</li><li>Is the item a parent workflow, child step, dependency, post-event deliverable, or completion evidence?</li><li>Which slots are known, missing, deferred, or risky to auto-approve?</li><li>What evidence text and confidence support the decision?</li></ul><p>The deterministic layer then decides whether the envelope is valid, whether approval is required, whether hierarchy should be normalized, and what should be persisted.</p><p>When refactoring this contract, update <code>docs/shared-context.md</code> with:</p><ul><li>the decision you changed,</li><li>why deterministic safety still holds,</li><li>which tests prove it,</li><li>and any watchpoints for the next Codex or Claude Code session.</li></ul><h2 id="backend-choices">Backend choices</h2><p>Clean installs can use a local CLI login session instead of committed API keys.</p><pre>$env:TASK_MANAGEMENT_OPERATING_AGENT = &quot;codex&quot;
+$env:TASK_MANAGEMENT_CODEX_MODEL = &quot;gpt-5.5&quot;</pre><p>or:</p><pre>$env:TASK_MANAGEMENT_OPERATING_AGENT = &quot;claude&quot;
 $env:TASK_MANAGEMENT_CLAUDE_MODEL = &quot;sonnet&quot;
-$env:TASK_MANAGEMENT_CLAUDE_FALLBACK = &quot;0&quot;</code></pre>
-<p>Both backends are semantic engines behind the same strict decision contract. The rest of the repository remains deterministic: validation, normalization, persistence, dedupe, rendering, and task-core preview should behave the same regardless of which backend produced the decision envelope.</p>
-<h2 id="clean-public-boundary">Clean-public boundary</h2>
-<p>Do not commit Slack tokens, app tokens, local state databases, JSONL event logs, raw transcripts, local user identifiers, or generated dashboards containing live data. CodeBoarding and agent-flow docs are safe only when local absolute paths and live identifiers are sanitized.</p></main><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'; mermaid.initialize({startOnLoad:true,securityLevel:'loose',theme:'default'});</script></body></html>
+$env:TASK_MANAGEMENT_CLAUDE_FALLBACK = &quot;0&quot;</pre><p>Both backends are semantic engines behind the same strict decision contract. The rest of the repository remains deterministic: validation, normalization, persistence, dedupe, rendering, and task-core preview should behave the same regardless of which backend produced the decision envelope.</p><h2 id="clean-public-boundary">Clean-public boundary</h2><p>Do not commit Slack tokens, app tokens, local state databases, JSONL event logs, raw transcripts, local user identifiers, or generated dashboards containing live data. CodeBoarding and agent-flow docs are safe only when local absolute paths and live identifiers are sanitized.</p></main></body></html>

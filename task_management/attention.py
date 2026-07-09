@@ -5,7 +5,12 @@ from datetime import date, datetime
 from typing import Iterable, Literal
 
 from .domain import ApprovalRequest, Proposal
-from .relations import blocking_dependencies
+from .relations import (
+    DEFERRED_MISSING_SLOTS_KEY,
+    DEFERRED_UNTIL_KEY,
+    blocking_dependencies,
+)
+from .work_item_state import is_due_overdue, requires_progress_confirmation
 
 
 AttentionKind = Literal["progress_confirmation", "deferred_reminder", "missing_info", "approval_decision"]
@@ -65,7 +70,7 @@ def collect_human_attention_items(
             HumanAttentionItem(
                 kind="progress_confirmation",
                 proposal=proposal,
-                overdue=proposal.due_date is not None and proposal.due_date < today,
+                overdue=is_due_overdue(proposal, today=today),
                 blocking_dependencies=blocking_dependencies(proposal, proposals_by_id),
             )
         )
@@ -103,12 +108,12 @@ def collect_human_attention_items(
 
 
 def deferred_missing_slots(proposal: Proposal) -> tuple[str, ...]:
-    raw = proposal.metadata.get("deferred_missing_slots", "")
+    raw = proposal.metadata.get(DEFERRED_MISSING_SLOTS_KEY, "")
     return tuple(dict.fromkeys(item.strip() for item in raw.split(",") if item.strip()))
 
 
 def has_deferred_missing_info(proposal: Proposal) -> bool:
-    return bool(proposal.metadata.get("deferred_until") and _has_unresolved_missing_info(proposal))
+    return bool(proposal.metadata.get(DEFERRED_UNTIL_KEY) and _has_unresolved_missing_info(proposal))
 
 
 def is_deferred_missing_info_pending(proposal: Proposal, *, today: date, now: datetime | None = None) -> bool:
@@ -116,16 +121,11 @@ def is_deferred_missing_info_pending(proposal: Proposal, *, today: date, now: da
 
 
 def _requires_progress_confirmation(proposal: Proposal, *, today: date) -> bool:
-    return (
-        proposal.status in {"approved", "applied"}
-        and proposal.kind in {"task", "question", "routine"}
-        and proposal.due_date is not None
-        and proposal.due_date <= today
-    )
+    return requires_progress_confirmation(proposal, today=today)
 
 
 def _requires_deferred_reminder(proposal: Proposal, *, today: date, now: datetime | None) -> bool:
-    if not proposal.metadata.get("deferred_until"):
+    if not proposal.metadata.get(DEFERRED_UNTIL_KEY):
         return False
     if proposal.status not in {"awaiting_approval", "approved", "applied"}:
         return False
@@ -139,13 +139,16 @@ def _has_unresolved_missing_info(proposal: Proposal) -> bool:
 
 
 def _deferred_is_due(proposal: Proposal, *, today: date, now: datetime | None) -> bool:
-    raw = proposal.metadata.get("deferred_until", "")
+    raw = proposal.metadata.get(DEFERRED_UNTIL_KEY, "")
     if not raw:
         return True
     try:
         target = datetime.fromisoformat(raw)
     except ValueError:
-        return True
+        # Conservative: an unparseable deferred_until is not treated as due, so a
+        # malformed value ('next week', '2026-06-13 09:00 KST') does not fire an
+        # immediate reminder. It stays quiet until corrected to a parseable value.
+        return False
     if now is not None:
         return now >= target
     return target.date() <= today

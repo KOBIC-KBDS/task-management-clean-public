@@ -5,19 +5,46 @@ from html import escape
 from typing import Any
 
 from .attention import has_deferred_missing_info
-from .domain import ApprovalRequest, OutboundMessage, Proposal
-from .human_view import date_label, date_window_display_label, render_missing_slot_labels
+from .domain import KIND_SPECS, ApprovalRequest, OutboundMessage, Proposal
+from .hierarchy_view import (
+    display_children,
+    is_workflow_context_parent,
+    section_anchor,
+)
+from .human_view import (
+    date_label,
+    missing_slots_card_label,
+    proposal_date_window_label,
+    proposal_participants_label,
+    proposal_status_label,
+)
 from .relations import (
+    CONFLICT_DETECTED_KEY,
+    CONFLICT_WITH_PROPOSAL_IDS_KEY,
+    DATE_WINDOW_KIND_KEY,
+    DEFERRED_UNTIL_KEY,
+    LINK_PREP_SUBTASK,
+    LINK_TYPE_KEY,
+    LOCATION_KEY,
+    PARTICIPANTS_KEY,
+    PROGRESS_NOTE_KEY,
+    PROGRESS_STATUS_KEY,
+    PROGRESS_UPDATED_AT_KEY,
+    REMAINING_WORK_KEY,
     child_proposals,
     is_workflow_parent,
-    parent_proposal_id,
     step_label,
     workflow_projection,
 )
 from .sort_keys import proposal_deadline_sort_key
 from .store import TeamTaskStore
 from .timeline import proposal_timeline
-from .work_item_state import is_open_work_item, needs_time_resolution, work_item_urgency_label
+from .work_item_state import (
+    is_open_work_item,
+    is_surface_visible_item,
+    needs_time_resolution,
+    work_item_urgency_label,
+)
 
 
 SURFACE_ROLES: dict[str, dict[str, str]] = {
@@ -50,17 +77,6 @@ BOARD_LABELS = {
     "reminders": "리마인더",
     "references": "참고 링크",
     "by_assignee": "담당자별",
-    "done": "완료",
-}
-
-
-STATUS_LABELS = {
-    "draft": "초안",
-    "posted": "게시됨",
-    "awaiting_approval": "승인 대기",
-    "approved": "승인됨",
-    "rejected": "거절됨",
-    "applied": "적용됨",
     "done": "완료",
 }
 
@@ -121,13 +137,10 @@ def render_kakao_text_card(message: OutboundMessage) -> str:
 
 
 def _card_missing_slots_label(card: dict[str, str]) -> str:
-    if card.get("missing_slot_labels"):
-        return card["missing_slot_labels"]
-    return render_missing_slot_labels(_split_csv(card.get("missing_slots", "")))
-
-
-def _split_csv(value: str) -> tuple[str, ...]:
-    return tuple(item.strip() for item in value.split(",") if item.strip())
+    return missing_slots_card_label(
+        card.get("missing_slot_labels", ""),
+        card.get("missing_slots", ""),
+    )
 
 
 def build_web_task_page_model(
@@ -141,16 +154,20 @@ def build_web_task_page_model(
     events = store.read_events()
     applied_exports = store.list_applied_exports()
     week_end = today + timedelta(days=6)
-    sorted_proposals = sorted(proposals, key=lambda item: proposal_deadline_sort_key(item, today=today, overdue_last=True))
+    surface_proposals = tuple(item for item in proposals if is_surface_visible_item(item))
+    sorted_proposals = sorted(
+        surface_proposals,
+        key=lambda item: proposal_deadline_sort_key(item, today=today, overdue_last=True),
+    )
     proposal_views = {
-        item.proposal_id: _proposal_view(item, applied_exports.get(item.proposal_id), today=today, events=events, proposals=proposals)
+        item.proposal_id: _proposal_view(item, applied_exports.get(item.proposal_id), today=today, events=events, proposals=surface_proposals)
         for item in sorted_proposals
     }
 
     sections = {
         "today": _hierarchy_section(
             [item for item in sorted_proposals if _belongs_in_today_section(item, today=today)],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
@@ -162,22 +179,26 @@ def build_web_task_page_model(
                 and (proposal_date := _proposal_date(item)) is not None
                 and today <= proposal_date <= week_end
             ],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
-        "pending_approvals": [_request_view(request, proposals) for request in pending_requests],
-        "questions": _hierarchy_section([item for item in sorted_proposals if item.kind == "question"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
+        "pending_approvals": [
+            _request_view(request, proposals)
+            for request in pending_requests
+            if _request_surface_visible(request, proposals)
+        ],
+        "questions": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "questions"], proposals=surface_proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
         "floating": _hierarchy_section(
             [item for item in sorted_proposals if item.status in {"draft", "posted", "awaiting_approval"} or item.missing_slots],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
-        "routines": _hierarchy_section([item for item in sorted_proposals if item.kind == "routine"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
+        "routines": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "routines"], proposals=surface_proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
         "prep_subtasks": _hierarchy_section(
-            [item for item in sorted_proposals if item.metadata.get("link_type") == "prep_subtask"],
-            proposals=proposals,
+            [item for item in sorted_proposals if item.metadata.get(LINK_TYPE_KEY) == LINK_PREP_SUBTASK],
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
@@ -191,11 +212,11 @@ def build_web_task_page_model(
             for event in events
             if str(event.get("type", "")).startswith("reminder.")
         ],
-        "references": _hierarchy_section([item for item in sorted_proposals if item.kind == "reference"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
-        "by_assignee": _by_assignee(proposals, applied_exports, today=today),
+        "references": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "references"], proposals=surface_proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
+        "by_assignee": _by_assignee(surface_proposals, applied_exports, today=today),
         "done": _hierarchy_section(
             [item for item in sorted_proposals if item.status in {"done", "applied"}],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
@@ -211,12 +232,12 @@ def build_web_task_page_model(
             "total": len(proposals),
             "approved": len([item for item in proposals if item.status == "approved"]),
             "awaiting_approval": len([item for item in proposals if item.status == "awaiting_approval"]),
-            "questions": len([item for item in proposals if item.kind == "question"]),
+            "questions": len(sections["questions"]),
             "floating": len(sections["floating"]),
             "routines": len(sections["routines"]),
             "prep_subtasks": len(sections["prep_subtasks"]),
             "reminders": len(sections["reminders"]),
-            "references": len([item for item in proposals if item.kind == "reference"]),
+            "references": len(sections["references"]),
             "done": len([item for item in proposals if item.status in {"done", "applied"}]),
             "preview_ready": preview_counts["ready"],
             "preview_blocked": preview_counts["blocked"],
@@ -1012,10 +1033,10 @@ def _proposal_view(
 ) -> dict[str, Any]:
     proposal_date = _proposal_date(proposal)
     preview_status = _preview_status(proposal, applied_export)
-    conflict_ids = proposal.metadata.get("conflict_with_proposal_ids", "")
-    if not conflict_ids and proposal.metadata.get("conflict_detected") == "true":
+    conflict_ids = proposal.metadata.get(CONFLICT_WITH_PROPOSAL_IDS_KEY, "")
+    if not conflict_ids and proposal.metadata.get(CONFLICT_DETECTED_KEY) == "true":
         conflict_ids = "충돌 확인 필요"
-    is_container = _is_workflow_context_parent(proposal)
+    is_container = is_workflow_context_parent(proposal)
     is_overdue = _is_overdue(proposal, today=today) and not _suppress_parent_overdue(proposal, proposals)
     urgency_label = work_item_urgency_label(proposal, today=today) if is_overdue else ""
     projection = workflow_projection(proposal, proposals) if proposals and is_workflow_parent(proposal, proposals) else None
@@ -1025,7 +1046,7 @@ def _proposal_view(
         "source_message_id": proposal.source_message_id,
         "title": proposal.title,
         "status": proposal.status,
-        "status_label": STATUS_LABELS.get(proposal.status, proposal.status),
+        "status_label": proposal_status_label(proposal.status),
         "kind": proposal.kind,
         "assigned_to": proposal.assigned_to,
         "task_management_area": proposal.task_management_area,
@@ -1035,12 +1056,12 @@ def _proposal_view(
         "urgency_label": urgency_label,
         "time_window": "" if is_container else proposal.time_window,
         "date_window": _date_window_label(proposal),
-        "date_window_kind": proposal.metadata.get("date_window_kind", ""),
+        DATE_WINDOW_KIND_KEY: proposal.metadata.get(DATE_WINDOW_KIND_KEY, ""),
         "missing_slots": ", ".join(proposal.missing_slots),
-        "participants": _participants_label(proposal),
-        "location": proposal.metadata.get("location", ""),
+        PARTICIPANTS_KEY: _participants_label(proposal),
+        LOCATION_KEY: proposal.metadata.get(LOCATION_KEY, ""),
         "parent_proposal_id": proposal.metadata.get("parent_proposal_id", ""),
-        "step_label": step_label(proposal),
+        "step_label": step_label(proposal, proposals),
         "workflow_id": proposal.metadata.get("workflow_id", ""),
         "workflow_title": proposal.metadata.get("workflow_title", ""),
         "rollup_status": projection.rollup_status if projection else "",
@@ -1050,13 +1071,13 @@ def _proposal_view(
         "preview_label": PREVIEW_LABELS[preview_status],
         "export_item_id": applied_export.get("export_item_id", "") if applied_export else "",
         "applied_at": applied_export.get("applied_at", "") if applied_export else "",
-        "deferred_until": proposal.metadata.get("deferred_until", ""),
-        "conflict_detected": proposal.metadata.get("conflict_detected", ""),
-        "conflict_with_proposal_ids": conflict_ids,
-        "progress_status": proposal.metadata.get("progress_status", ""),
-        "progress_note": proposal.metadata.get("progress_note", ""),
-        "remaining_work": proposal.metadata.get("remaining_work", ""),
-        "progress_updated_at": proposal.metadata.get("progress_updated_at", ""),
+        DEFERRED_UNTIL_KEY: proposal.metadata.get(DEFERRED_UNTIL_KEY, ""),
+        CONFLICT_DETECTED_KEY: proposal.metadata.get(CONFLICT_DETECTED_KEY, ""),
+        CONFLICT_WITH_PROPOSAL_IDS_KEY: conflict_ids,
+        PROGRESS_STATUS_KEY: proposal.metadata.get(PROGRESS_STATUS_KEY, ""),
+        PROGRESS_NOTE_KEY: proposal.metadata.get(PROGRESS_NOTE_KEY, ""),
+        REMAINING_WORK_KEY: proposal.metadata.get(REMAINING_WORK_KEY, ""),
+        PROGRESS_UPDATED_AT_KEY: proposal.metadata.get(PROGRESS_UPDATED_AT_KEY, ""),
         "children": [],
         "child_total_count": 0,
         "child_done_count": 0,
@@ -1078,6 +1099,11 @@ def _request_view(request: ApprovalRequest, proposals: tuple[Proposal, ...]) -> 
     }
 
 
+def _request_surface_visible(request: ApprovalRequest, proposals: tuple[Proposal, ...]) -> bool:
+    proposal = next((item for item in proposals if item.proposal_id == request.proposal_id), None)
+    return proposal is None or is_surface_visible_item(proposal)
+
+
 def _by_assignee(
     proposals: tuple[Proposal, ...],
     applied_exports: dict[str, dict[str, str]],
@@ -1087,7 +1113,7 @@ def _by_assignee(
     grouped: dict[str, list[dict[str, Any]]] = {}
     for proposal in sorted(proposals, key=lambda item: proposal_deadline_sort_key(item, today=today, overdue_last=True)):
         grouped.setdefault(proposal.assigned_to, []).append(
-            _proposal_view(proposal, applied_exports.get(proposal.proposal_id), today=today)
+            _proposal_view(proposal, applied_exports.get(proposal.proposal_id), today=today, proposals=proposals)
         )
     return grouped
 
@@ -1104,13 +1130,13 @@ def _hierarchy_section(
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
     for proposal in section_proposals:
-        anchor = _section_anchor(proposal, proposals_by_id, visible_ids)
+        anchor = section_anchor(proposal, proposals_by_id, visible_ids)
         if anchor.proposal_id in seen:
             continue
         seen.add(anchor.proposal_id)
         item = dict(proposal_views[anchor.proposal_id])
-        all_children = child_proposals(anchor, proposals)
-        children_to_render = _display_children(all_children, max_completed_children=max_completed_children)
+        all_children = tuple(child for child in child_proposals(anchor, proposals) if is_surface_visible_item(child))
+        children_to_render = display_children(all_children, max_completed_children=max_completed_children)
         children = [
             dict(proposal_views[child.proposal_id])
             for child in children_to_render
@@ -1123,64 +1149,12 @@ def _hierarchy_section(
     return result
 
 
-def _section_anchor(
-    proposal: Proposal,
-    proposals_by_id: dict[str, Proposal],
-    visible_ids: set[str],
-) -> Proposal:
-    current = proposal
-    anchor: Proposal | None = None
-    seen: set[str] = set()
-    while True:
-        parent_id = parent_proposal_id(current)
-        parent = proposals_by_id.get(parent_id) if parent_id else None
-        if parent is None or parent.proposal_id in seen:
-            break
-        seen.add(parent.proposal_id)
-        if parent.proposal_id in visible_ids or _is_workflow_context_parent(parent):
-            anchor = parent
-        current = parent
-    return anchor or proposal
-
-
-def _display_children(
-    children: tuple[Proposal, ...],
-    *,
-    max_completed_children: int | None,
-) -> tuple[Proposal, ...]:
-    if max_completed_children is None:
-        return children
-    completed = [child for child in children if child.status in {"done", "applied"}]
-    if len(completed) <= max_completed_children:
-        return children
-    recent_completed_ids = {
-        child.proposal_id
-        for child in sorted(completed, key=_completion_sort_key, reverse=True)[:max_completed_children]
-    }
-    return tuple(
-        child
-        for child in children
-        if child.status not in {"done", "applied"} or child.proposal_id in recent_completed_ids
-    )
-
-
 def _completed_proposal_count(proposals: tuple[Proposal, ...]) -> int:
     return sum(1 for proposal in proposals if proposal.status in {"done", "applied"})
 
 
-def _completion_sort_key(proposal: Proposal) -> tuple[str, str]:
-    completed_at = proposal.metadata.get("completed_at", "")
-    updated_at = proposal.updated_at.isoformat(timespec="seconds") if proposal.updated_at else ""
-    created_at = proposal.created_at.isoformat(timespec="seconds") if proposal.created_at else ""
-    return (completed_at or updated_at or created_at, proposal.proposal_id)
-
-
-def _is_workflow_context_parent(proposal: Proposal) -> bool:
-    return proposal.metadata.get("workflow_container") == "true" or proposal.metadata.get("workflow_role") == "parent"
-
-
 def _suppress_parent_overdue(proposal: Proposal, proposals: tuple[Proposal, ...]) -> bool:
-    if not _is_workflow_context_parent(proposal):
+    if not is_workflow_context_parent(proposal):
         return False
     return bool(child_proposals(proposal, proposals))
 
@@ -1206,6 +1180,8 @@ def _preview_counts(
 def _preview_status(proposal: Proposal, applied_export: dict[str, str] | None = None) -> str:
     if applied_export is not None or proposal.status == "applied":
         return "applied"
+    if proposal.status in {"rejected", "done"}:
+        return "excluded"
     if proposal.status == "approved" and not proposal.missing_slots:
         return "ready"
     if proposal.status in {"draft", "posted", "awaiting_approval"} or proposal.kind == "question" or proposal.missing_slots:
@@ -1315,22 +1291,22 @@ def _proposal_row(item: dict[str, Any], *, scope: str, child: bool = False) -> s
         pills.append(_pill(display_date, "ok"))
     if item["time_window"]:
         pills.append(_pill(f"시간 {item['time_window']}", "ok"))
-    if item["participants"]:
-        pills.append(_pill(f"참석 {item['participants']}"))
-    if item["location"]:
-        pills.append(_pill(f"장소 {item['location']}"))
+    if item[PARTICIPANTS_KEY]:
+        pills.append(_pill(f"참석 {item[PARTICIPANTS_KEY]}"))
+    if item[LOCATION_KEY]:
+        pills.append(_pill(f"장소 {item[LOCATION_KEY]}"))
     if item["date_window"]:
         pills.append(_pill(item["date_window"], "warn"))
-    if item["progress_status"]:
-        pills.append(_pill(f"진행 {item['progress_status']}", "warn"))
-    if item["remaining_work"]:
-        pills.append(_pill(f"남은 일 {item['remaining_work']}", "warn"))
+    if item[PROGRESS_STATUS_KEY]:
+        pills.append(_pill(f"진행 {item[PROGRESS_STATUS_KEY]}", "warn"))
+    if item[REMAINING_WORK_KEY]:
+        pills.append(_pill(f"남은 일 {item[REMAINING_WORK_KEY]}", "warn"))
     if item["missing_slots"]:
         pills.append(_pill(f"확인: {item['missing_slots']}", "danger"))
-    if item["conflict_with_proposal_ids"]:
-        pills.append(_pill(f"충돌: {item['conflict_with_proposal_ids']}", "danger"))
-    if item["deferred_until"]:
-        pills.append(_pill(f"리마인드 {item['deferred_until']}", "warn"))
+    if item[CONFLICT_WITH_PROPOSAL_IDS_KEY]:
+        pills.append(_pill(f"충돌: {item[CONFLICT_WITH_PROPOSAL_IDS_KEY]}", "danger"))
+    if item[DEFERRED_UNTIL_KEY]:
+        pills.append(_pill(f"리마인드 {item[DEFERRED_UNTIL_KEY]}", "warn"))
     if item.get("step_label"):
         pills.append(_pill(f"단계 {item['step_label']}", "ok"))
     if item.get("rollup_status"):
@@ -1424,7 +1400,7 @@ def _status_panel(status_counts: dict[str, int]) -> str:
         body = '<p>아직 상태가 없습니다.</p>'
     else:
         body = '<div class="task-meta">' + "".join(
-            _pill(f"{STATUS_LABELS.get(status, status)} {count}") for status, count in sorted(status_counts.items())
+            _pill(f"{proposal_status_label(status)} {count}") for status, count in sorted(status_counts.items())
         ) + "</div>"
     return f"""<section class="panel">
   <h2>Status</h2>
@@ -1465,10 +1441,7 @@ def _event_item(event: dict[str, Any]) -> str:
 
 
 def _date_window_label(proposal: Proposal) -> str:
-    start = proposal.metadata.get("date_window_start", "")
-    end = proposal.metadata.get("date_window_end", "")
-    label = proposal.metadata.get("date_window_label", "")
-    return date_window_display_label(start, end, label)
+    return proposal_date_window_label(proposal)
 
 
 def _proposal_detail(detail_id: str, item: dict[str, Any]) -> str:
@@ -1482,16 +1455,16 @@ def _proposal_detail(detail_id: str, item: dict[str, Any]) -> str:
         ("날짜", item.get("date_label") or item["date"]),
         ("시간", item["time_window"]),
         ("가능 기간", item["date_window"]),
-        ("기간 유형", item["date_window_kind"]),
-        ("참석", item["participants"]),
-        ("장소", item["location"]),
+        ("기간 유형", item[DATE_WINDOW_KIND_KEY]),
+        ("참석", item[PARTICIPANTS_KEY]),
+        ("장소", item[LOCATION_KEY]),
         ("확인 필요", item["missing_slots"]),
-        ("충돌", item["conflict_with_proposal_ids"]),
-        ("리마인드", item["deferred_until"]),
-        ("진행 상태", item["progress_status"]),
-        ("남은 일", item["remaining_work"]),
-        ("진행 메모", item["progress_note"]),
-        ("진행 갱신", item["progress_updated_at"]),
+        ("충돌", item[CONFLICT_WITH_PROPOSAL_IDS_KEY]),
+        ("리마인드", item[DEFERRED_UNTIL_KEY]),
+        ("진행 상태", item[PROGRESS_STATUS_KEY]),
+        ("남은 일", item[REMAINING_WORK_KEY]),
+        ("진행 메모", item[PROGRESS_NOTE_KEY]),
+        ("진행 갱신", item[PROGRESS_UPDATED_AT_KEY]),
         ("Export item", item["export_item_id"]),
         ("Applied at", item["applied_at"]),
         ("Proposal", item["proposal_id"]),
@@ -1535,13 +1508,4 @@ def _html_id(prefix: str, value: str) -> str:
 
 
 def _participants_label(proposal: Proposal) -> str:
-    metadata = proposal.metadata
-    if metadata.get("participant_label"):
-        return metadata["participant_label"]
-    if metadata.get("attendees"):
-        return metadata["attendees"]
-    participants = metadata.get("participants", "")
-    external = metadata.get("external_participants", "")
-    if participants and external:
-        return f"{participants} + {external}"
-    return participants or external
+    return proposal_participants_label(proposal, translate=False)

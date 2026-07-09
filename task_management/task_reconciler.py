@@ -1,17 +1,86 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import date, datetime, timedelta
+from .relations import (
+    ATTENDEES_KEY,
+    CONFLICT_DETECTED_KEY,
+    CONFLICT_WITH_PROPOSAL_IDS_KEY,
+    DEFERRED_MISSING_SLOTS_KEY,
+    DEFERRED_REASON_KEY,
+    DEFERRED_REMINDER_CADENCE_HOURS_KEY,
+    DEFERRED_UNTIL_KEY,
+    EXTERNAL_PARTICIPANTS_KEY,
+    LAST_STATE_LINKED_UPDATE_TYPE_KEY,
+    LINK_PREP_SUBTASK,
+    LINK_TYPE_KEY,
+    LOCATION_KEY,
+    LOCATION_OPTIONAL_KEY,
+    NEEDS_EXACT_TIME_KEY,
+    NEEDS_PREP_KEY,
+    PARTICIPANTS_KEY,
+    PARTICIPANT_LABEL_KEY,
+)
+
+from dataclasses import dataclass, replace
+from datetime import date, datetime
+from typing import Callable, Literal
 import hashlib
 import os
 import re
 
-from .conflict_policy import apply_conflict_resolution_feedback
+from .channels import channel_for_message_id
+from .conflict_policy import apply_conflict_resolution_feedback, recompute_missing_slots
 from .deferred_policy import csv_dedupe, default_deferred_until
 from .domain import ApprovalDecision, IncomingMessage, OrchestrationResult, Proposal
 from .discussion_adapter import parse_temporal_update
-from .slot_validator import missing_slots_for_proposal
+from .korean_time import relative_date
+from .feedback_scoring import (
+    CONTEXT_TOKEN_WEIGHT,
+    DEICTIC_CONFLICT_BONUS,
+    DISCUSSION_WORD_BONUS,
+    NEXT_WEEK_BONUS,
+    RAW_TOKEN_WEIGHT,
+    RETURN_BONUS,
+    SLOT_HINT_BONUS,
+    TITLE_TOKEN_WEIGHT,
+    pick_best_candidate,
+)
+from .operating_agent import OperatingAgentDecision
+from .source_refs import source_metadata as _source_metadata, text_hash as _text_hash
 from .store import TeamTaskStore
+
+
+@dataclass(frozen=True)
+class ReconcilerRule:
+    """One deterministic reconciliation scenario in declarative form.
+
+    A rule is the registry-shaped contract behind the two historical reconciler
+    tails.  ``match`` does the cheap detection (and any parent/parse lookup),
+    returning an opaque match-object the rule's ``apply`` consumes, or ``None``
+    when the rule does not fire.  ``apply`` performs the persistence-bearing
+    mutation and returns the produced proposals.  Rules share the existing
+    persistence helpers (``_persist_reconciled_change`` and the
+    ``proposal.created``/``proposal.approved`` emission) so a new scenario is a
+    single ``ReconcilerRule`` entry plus its ``match``/``apply`` functions.
+
+    INVARIANT 1 (reconciler is fallback-only) and INVARIANT 8 (the score/gap
+    gates) are enforced by the orchestrator and the central branch chain in
+    ``apply_state_linked_update`` *before* any ``update_existing`` rule runs;
+    rules never relax those gates.
+    """
+
+    name: str
+    phase: Literal["create_followup", "update_existing"]
+    priority: int
+    match: Callable[[TeamTaskStore, IncomingMessage], object | None]
+    apply: Callable[[TeamTaskStore, object, datetime], tuple[Proposal, ...]]
+
+
+def _rules_for_phase(phase: str) -> tuple[ReconcilerRule, ...]:
+    return tuple(
+        rule
+        for rule in sorted(RECONCILER_RULES, key=lambda item: item.priority)
+        if rule.phase == phase
+    )
 
 
 def reconcile_message(
@@ -32,9 +101,11 @@ def reconcile_message(
     del result  # reserved for future reconciliation between agent output and store state
     now = reconciled_at or message.received_at
     created: list[Proposal] = []
-    presentation_prep = _presentation_materials_prep(store, message, now=now)
-    if presentation_prep is not None:
-        created.append(presentation_prep)
+    for rule in _rules_for_phase("create_followup"):
+        matched = rule.match(store, message)
+        if matched is None:
+            continue
+        created.extend(rule.apply(store, matched, now))
     if created:
         store.append_event(
             "slack.message.reconciled",
@@ -47,19 +118,43 @@ def reconcile_message(
     return tuple(created)
 
 
+def _is_slack_notification_candidate_message(message: IncomingMessage) -> bool:
+    channel = channel_for_message_id(message.message_id)
+    return (
+        message.visibility == "team"
+        and channel is not None
+        and channel.notification_fallback_candidate
+    )
+
+
+_TRUSTED_SEMANTIC_DECISION_SOURCES = {
+    "claude_code_cli",
+    "codex_cli",
+    "openai_responses",
+}
+
+
+def _should_run_state_linked_fallback(message: IncomingMessage, decision: OperatingAgentDecision) -> bool:
+    if decision.action != "no_action":
+        return False
+    if _is_slack_notification_candidate_message(message):
+        return False
+    return decision.source not in _TRUSTED_SEMANTIC_DECISION_SOURCES
+
+
 def apply_state_linked_update(
     store: TeamTaskStore,
     message: IncomingMessage,
     *,
     updated_at: datetime | None = None,
 ) -> tuple[Proposal, ...]:
-    """Apply deterministic updates to existing proposals before creating new ones.
+    """Apply deterministic updates to existing proposals as a fallback after the agent.
 
-    The important operating principle is semantic, not rule-shaped: a follow-up
-    Slack DM is interpreted against the open task_management state before it is parsed
-    as a new task.  When multiple proposals are pending, split the answer into
-    meaning-bearing clauses, resolve each clause to a concrete proposal, and only
-    then apply slots.  If a clause cannot be mapped confidently, do not mutate an
+    This runs only after the operating agent returns ``no_action`` from a non-trusted
+    source (see ``_should_run_state_linked_fallback``); the agent remains
+    the primary semantic extractor.  When multiple proposals are pending, split the
+    answer into meaning-bearing clauses, resolve each clause to a concrete proposal, and
+    only then apply slots.  If a clause cannot be mapped confidently, do not mutate an
     arbitrary "first" pending item.
     """
 
@@ -90,9 +185,11 @@ def apply_state_linked_update(
                 resolved_missing_info = _missing_info_resolution_update(store, message, now=now)
                 if resolved_missing_info is not None:
                     updated.append(resolved_missing_info)
-            schedule_update = _official_presentation_schedule_update(store, message, now=now)
-            if schedule_update is not None:
-                updated.append(schedule_update)
+            for rule in _rules_for_phase("update_existing"):
+                matched = rule.match(store, message)
+                if matched is None:
+                    continue
+                updated.extend(rule.apply(store, matched, now))
     if updated:
         store.append_event(
             "slack.message.reconciled",
@@ -114,10 +211,10 @@ def _semantic_pending_feedback_updates(
 ) -> tuple[Proposal, ...]:
     """Resolve multi-clause feedback against pending proposals before slot parse.
 
-    This is the deterministic version of the intended LLM operation.  It keeps
-    the same invariant the future semantic agent must keep: propose targeted
-    patches with evidence, never spray one parsed date/time across all pending
-    tasks.
+    Runs only after the operating agent returns ``no_action`` from a non-trusted
+    source (see ``_should_run_state_linked_fallback``).  It keeps the
+    same invariant the agent must keep: propose targeted patches with evidence,
+    never spray one parsed date/time across all pending tasks.
     """
 
     candidates = _pending_info_candidates(store)
@@ -227,45 +324,36 @@ def _resolve_feedback_clause_target(
         for score in (_feedback_clause_score(proposal, clause),)
         if score > 0
     ]
-    if not scored:
-        return None
-    scored.sort(key=lambda item: (item[0], item[1].updated_at or item[1].created_at or datetime.min), reverse=True)
-    best_score, best = scored[0]
-    runner_up = scored[1][0] if len(scored) > 1 else 0
-    if best_score < 8:
-        return None
-    if runner_up and best_score - runner_up < 3:
-        return None
-    return best
+    return pick_best_candidate(scored)
 
 
 def _feedback_clause_score(proposal: Proposal, clause: str) -> int:
     normalized = clause.lower()
     score = 0
     if _is_this_discussion_clause(normalized):
-        if proposal.metadata.get("conflict_detected") == "true" or "conflict_resolution" in proposal.missing_slots:
-            score += 80
+        if proposal.metadata.get(CONFLICT_DETECTED_KEY) == "true" or "conflict_resolution" in proposal.missing_slots:
+            score += DEICTIC_CONFLICT_BONUS
         if any(token in f"{proposal.title} {proposal.raw_text}".lower() for token in ("논의", "할일", "할 일", "정리")):
-            score += 10
+            score += DISCUSSION_WORD_BONUS
     title_tokens = _clean_context_tokens(proposal.title)
     raw_tokens = _clean_context_tokens(proposal.raw_text)
     clause_tokens = _clean_context_tokens(clause)
     title_overlap = _strong_target_tokens(title_tokens & clause_tokens)
     raw_overlap = _strong_target_tokens((raw_tokens - title_tokens) & clause_tokens)
     context_overlap = _strong_target_tokens(_target_context_tokens(proposal) & clause_tokens)
-    score += 12 * len(title_overlap)
-    score += 5 * len(raw_overlap)
-    score += 4 * len(context_overlap)
+    score += TITLE_TOKEN_WEIGHT * len(title_overlap)
+    score += RAW_TOKEN_WEIGHT * len(raw_overlap)
+    score += CONTEXT_TOKEN_WEIGHT * len(context_overlap)
     if "차주" in normalized and any(token in f"{proposal.title} {proposal.raw_text}" for token in ("차주", "복귀")):
-        score += 25
+        score += NEXT_WEEK_BONUS
     if "복귀" in normalized and "복귀" in f"{proposal.title} {proposal.raw_text}":
-        score += 20
+        score += RETURN_BONUS
     if "담당" in normalized and "assigned_to" in proposal.missing_slots:
-        score += 3
+        score += SLOT_HINT_BONUS
     if any(token in normalized for token in ("일시", "언제", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일")) and any(
         slot in proposal.missing_slots for slot in ("date", "time", "exact_date")
     ):
-        score += 3
+        score += SLOT_HINT_BONUS
     return score
 
 
@@ -333,95 +421,6 @@ def _looks_like_new_work_clause(clause: str, *, reference_date: date) -> bool:
     return action_signal and (owner_signal or deadline_signal)
 
 
-def _semantic_tokens(text: str) -> set[str]:
-    stopwords = {
-        "오늘",
-        "내일",
-        "모레",
-        "이번주",
-        "다음주",
-        "차주",
-        "담당자",
-        "담당자는",
-        "일시는",
-        "일시",
-        "좋겠네",
-        "할",
-        "일",
-        "이",
-        "그",
-        "저",
-        "것",
-        "는",
-        "은",
-    }
-    tokens: set[str] = set()
-    for token in re.split(r"[^0-9A-Za-z가-힣]+", text.lower()):
-        if len(token) < 2 or token in stopwords:
-            continue
-        tokens.update(item for item in _semantic_token_variants(token) if len(item) >= 2 and item not in stopwords)
-    return tokens
-
-
-_GENERIC_FEEDBACK_TOKENS = {
-    "실사용테스트",
-    "테스트",
-    "확인",
-    "필요",
-    "일정",
-    "작업",
-    "담당",
-    "담당자",
-    "정하기",
-    "정하자",
-}
-
-
-def _semantic_token_variants(token: str) -> set[str]:
-    variants = {token}
-    for suffix in (
-        "으로",
-        "에는",
-        "에서",
-        "에게",
-        "까지",
-        "부터",
-        "하고",
-        "이랑",
-        "랑",
-        "은",
-        "는",
-        "이",
-        "가",
-        "을",
-        "를",
-        "로",
-        "와",
-        "과",
-        "쪽",
-    ):
-        if token.endswith(suffix) and len(token) > len(suffix) + 1:
-            variants.add(token[: -len(suffix)])
-    return variants
-
-
-def _target_semantic_tokens(proposal: Proposal) -> set[str]:
-    metadata_text = " ".join(
-        value
-        for key, value in proposal.metadata.items()
-        if key
-        in {
-            "participant_label",
-            "external_owner",
-            "external_participants",
-            "materials",
-            "location",
-            "parent_title",
-        }
-    )
-    return _semantic_tokens(f"{proposal.title} {proposal.raw_text} {metadata_text}")
-
-
 def _target_context_tokens(proposal: Proposal) -> set[str]:
     metadata_text = " ".join(
         value
@@ -431,8 +430,8 @@ def _target_context_tokens(proposal: Proposal) -> set[str]:
             "materials",
             "parent_title",
             "external_owner",
-            "external_participants",
-            "participant_label",
+            EXTERNAL_PARTICIPANTS_KEY,
+            PARTICIPANT_LABEL_KEY,
         }
     )
     return _clean_context_tokens(metadata_text)
@@ -462,6 +461,84 @@ def _self_assignee_tokens() -> tuple[str, ...]:
     return tuple(tokens)
 
 
+def _derive_schedule_fields(
+    proposal: Proposal,
+    temporal: dict[str, str],
+    *,
+    prefers_due_task: bool = False,
+) -> tuple[date | None, date | None, str]:
+    """Derive (due_date, scheduled_date, kind) from a temporal update.
+
+    Owns the due/scheduled mutual exclusion (a temporal due_date clears scheduled_date and
+    vice versa) and the base kind reclassification shared by both reconciled-update tails:
+    a scheduled_date makes the item an event; a due_date on a pending question makes it a
+    task.  When ``prefers_due_task`` is set, a scheduled_date is reinterpreted as a due_date
+    task (the semantic path's "할일" interpretation).
+    """
+
+    due_date = proposal.due_date
+    scheduled_date = proposal.scheduled_date
+    if temporal.get("due_date"):
+        due_date = datetime.fromisoformat(temporal["due_date"]).date()
+        scheduled_date = None
+    if temporal.get("scheduled_date"):
+        scheduled_date = datetime.fromisoformat(temporal["scheduled_date"]).date()
+        due_date = None
+    if prefers_due_task and scheduled_date is not None:
+        due_date = scheduled_date
+        scheduled_date = None
+
+    kind = proposal.kind
+    if prefers_due_task:
+        kind = "task"
+    elif scheduled_date is not None:
+        kind = "event"
+    elif due_date is not None and kind == "question":
+        kind = "task"
+    return due_date, scheduled_date, kind
+
+
+def _persist_reconciled_change(
+    store: TeamTaskStore,
+    original: Proposal,
+    changed: Proposal,
+    *,
+    change_body: str,
+    actor_id: str,
+    change_type: str,
+    now: datetime,
+) -> Proposal | None:
+    """Recompute slots, settle approval, persist, and emit the proposal events.
+
+    Shared tail for both reconciled-update paths: recompute missing slots, mark the
+    missing-info request approved when nothing is left open, skip persistence when the
+    recompute produced no change, then save and emit ``proposal.changed`` (and
+    ``proposal.approved`` once the proposal reaches ``approved``).
+    """
+
+    changed = replace(changed, missing_slots=recompute_missing_slots(changed), updated_at=now)
+    if not changed.missing_slots:
+        changed = _mark_missing_info_approved(store, changed, actor_id=actor_id, now=now)
+    elif changed == original:
+        return None
+
+    store.save_proposal(changed)
+    store.append_event(
+        "proposal.changed",
+        {
+            "proposal": changed,
+            "change_body": change_body,
+            "actor_id": actor_id,
+            "reconciled": True,
+            "change_type": change_type,
+        },
+        occurred_at=now,
+    )
+    if changed.status == "approved":
+        store.append_event("proposal.approved", {"proposal": changed, "reconciled": True}, occurred_at=now)
+    return changed
+
+
 def _apply_semantic_clause_update(
     store: TeamTaskStore,
     proposal: Proposal,
@@ -487,40 +564,27 @@ def _apply_semantic_clause_update(
         }
     )
 
-    due_date = proposal.due_date
-    scheduled_date = proposal.scheduled_date
-    if temporal.get("due_date"):
-        due_date = datetime.fromisoformat(temporal["due_date"]).date()
-        scheduled_date = None
-    if temporal.get("scheduled_date"):
-        scheduled_date = datetime.fromisoformat(temporal["scheduled_date"]).date()
-        due_date = None
+    due_date, scheduled_date, kind = _derive_schedule_fields(proposal, temporal)
     prefers_due_task = scheduled_date is not None and _semantic_clause_prefers_due_task(proposal, clause)
     if prefers_due_task:
-        due_date = scheduled_date
-        scheduled_date = None
+        due_date, scheduled_date, kind = _derive_schedule_fields(
+            proposal, temporal, prefers_due_task=True
+        )
         metadata["semantic_schedule_interpretation"] = "due_task"
-    if not temporal.get("location") and _looks_like_stale_location(metadata.get("location", "")):
-        metadata.pop("location", None)
+    if not temporal.get(LOCATION_KEY) and _looks_like_stale_location(metadata.get(LOCATION_KEY, "")):
+        metadata.pop(LOCATION_KEY, None)
 
-    kind = proposal.kind
     missing_slots = proposal.missing_slots
     if _semantic_clause_reclassifies_conflict_as_task(proposal, clause, temporal):
         kind = "task"
         scheduled_date = None
         metadata["semantic_correction"] = "not_blocking_event_due_task"
-        metadata["previous_conflict_detected"] = metadata.pop("conflict_detected", "")
-        metadata.pop("conflict_with_proposal_ids", None)
+        metadata["previous_conflict_detected"] = metadata.pop(CONFLICT_DETECTED_KEY, "")
+        metadata.pop(CONFLICT_WITH_PROPOSAL_IDS_KEY, None)
         metadata.pop("conflict_policy", None)
         metadata.pop("blocks_in_person", None)
         metadata.pop("event_scope", None)
         missing_slots = tuple(slot for slot in missing_slots if slot != "conflict_resolution")
-    elif prefers_due_task:
-        kind = "task"
-    elif scheduled_date is not None:
-        kind = "event"
-    elif due_date is not None and kind == "question":
-        kind = "task"
 
     changed = replace(
         proposal,
@@ -533,27 +597,15 @@ def _apply_semantic_clause_update(
         metadata=metadata,
         updated_at=now,
     )
-    changed = replace(changed, missing_slots=missing_slots_for_proposal(changed), updated_at=now)
-    if not changed.missing_slots:
-        changed = _mark_missing_info_approved(store, changed, actor_id=actor_id, now=now)
-    elif changed == proposal:
-        return None
-
-    store.save_proposal(changed)
-    store.append_event(
-        "proposal.changed",
-        {
-            "proposal": changed,
-            "change_body": clause,
-            "actor_id": actor_id,
-            "reconciled": True,
-            "change_type": "semantic_pending_feedback",
-        },
-        occurred_at=now,
+    return _persist_reconciled_change(
+        store,
+        proposal,
+        changed,
+        change_body=clause,
+        actor_id=actor_id,
+        change_type="semantic_pending_feedback",
+        now=now,
     )
-    if changed.status == "approved":
-        store.append_event("proposal.approved", {"proposal": changed, "reconciled": True}, occurred_at=now)
-    return changed
 
 
 def _semantic_clause_reclassifies_conflict_as_task(
@@ -561,7 +613,7 @@ def _semantic_clause_reclassifies_conflict_as_task(
     clause: str,
     temporal: dict[str, str],
 ) -> bool:
-    if proposal.metadata.get("conflict_detected") != "true" and "conflict_resolution" not in proposal.missing_slots:
+    if proposal.metadata.get(CONFLICT_DETECTED_KEY) != "true" and "conflict_resolution" not in proposal.missing_slots:
         return False
     if not temporal.get("due_date"):
         return False
@@ -616,20 +668,7 @@ def _missing_info_resolution_update(
         message_id=message.message_id,
         now=now,
     )
-    due_date = proposal.due_date
-    scheduled_date = proposal.scheduled_date
-    if temporal.get("due_date"):
-        due_date = datetime.fromisoformat(temporal["due_date"]).date()
-        scheduled_date = None
-    if temporal.get("scheduled_date"):
-        scheduled_date = datetime.fromisoformat(temporal["scheduled_date"]).date()
-        due_date = None
-
-    kind = proposal.kind
-    if scheduled_date is not None:
-        kind = "event"
-    elif due_date is not None and kind == "question":
-        kind = "task"
+    due_date, scheduled_date, kind = _derive_schedule_fields(proposal, temporal)
 
     changed = replace(
         proposal,
@@ -640,28 +679,16 @@ def _missing_info_resolution_update(
         metadata=metadata,
         updated_at=now,
     )
-    missing_slots = missing_slots_for_proposal(changed)
-    changed = replace(changed, missing_slots=missing_slots, updated_at=now)
-    if not missing_slots:
-        changed = _mark_missing_info_approved(store, changed, actor_id=message.sender_id, now=now)
-    elif changed == proposal:
-        return None
-
-    store.save_proposal(changed)
-    store.append_event(
-        "proposal.changed",
-        {
-            "proposal": changed,
-            "change_body": text,
-            "actor_id": message.sender_id,
-            "reconciled": True,
-            "change_type": "missing_info_resolved" if not missing_slots else "missing_info_partial",
-        },
-        occurred_at=now,
+    change_type = "missing_info_resolved" if not recompute_missing_slots(changed) else "missing_info_partial"
+    return _persist_reconciled_change(
+        store,
+        proposal,
+        changed,
+        change_body=text,
+        actor_id=message.sender_id,
+        change_type=change_type,
+        now=now,
     )
-    if changed.status == "approved":
-        store.append_event("proposal.approved", {"proposal": changed, "reconciled": True}, occurred_at=now)
-    return changed
 
 
 def _has_resolution_signal(temporal: dict[str, str]) -> bool:
@@ -670,11 +697,11 @@ def _has_resolution_signal(temporal: dict[str, str]) -> bool:
             "due_date",
             "scheduled_date",
             "time_window",
-            "participants",
-            "external_participants",
-            "participant_label",
-            "attendees",
-            "location",
+            PARTICIPANTS_KEY,
+            EXTERNAL_PARTICIPANTS_KEY,
+            PARTICIPANT_LABEL_KEY,
+            ATTENDEES_KEY,
+            LOCATION_KEY,
         }.intersection(temporal)
     )
 
@@ -689,31 +716,31 @@ def _apply_temporal_metadata(
 ) -> dict[str, str]:
     updated = {
         **metadata,
-        "last_state_linked_update_type": "missing_info_resolved",
+        LAST_STATE_LINKED_UPDATE_TYPE_KEY: "missing_info_resolved",
         "last_resolution_update_message_id": message_id,
         "last_resolution_update_at": now.isoformat(timespec="seconds"),
         "last_resolution_actor_id": actor_id,
     }
     for key in (
-        "participants",
-        "external_participants",
-        "participant_label",
-        "attendees",
-        "location",
-        "location_optional",
+        PARTICIPANTS_KEY,
+        EXTERNAL_PARTICIPANTS_KEY,
+        PARTICIPANT_LABEL_KEY,
+        ATTENDEES_KEY,
+        LOCATION_KEY,
+        LOCATION_OPTIONAL_KEY,
         "materials",
-        "needs_prep",
-        "needs_exact_time",
+        NEEDS_PREP_KEY,
+        NEEDS_EXACT_TIME_KEY,
     ):
         if temporal.get(key):
             updated[key] = temporal[key]
     if temporal.get("scheduled_date") or temporal.get("due_date") or temporal.get("time_window"):
         for key in (
-            "deferred_missing_slots",
-            "deferred_reason",
+            DEFERRED_MISSING_SLOTS_KEY,
+            DEFERRED_REASON_KEY,
             "deferred_at",
-            "deferred_until",
-            "deferred_reminder_cadence_hours",
+            DEFERRED_UNTIL_KEY,
+            DEFERRED_REMINDER_CADENCE_HOURS_KEY,
         ):
             updated.pop(key, None)
     return updated
@@ -726,12 +753,20 @@ def _mark_missing_info_approved(
     actor_id: str,
     now: datetime,
 ) -> Proposal:
-    request = _pending_request_for_actor(store, proposal.proposal_id, actor_id)
+    request = _pending_request_for_actor(
+        store,
+        proposal.proposal_id,
+        actor_id,
+        required_approvers=proposal.required_approvers,
+    )
     approvals = tuple(sorted(set((*proposal.approvals, actor_id))))
     required = proposal.required_approvers or (actor_id,)
     status = "approved" if set(required).issubset(approvals) else "awaiting_approval"
     changed = replace(proposal, status=status, approvals=approvals, required_approvers=required, updated_at=now)
-    if request is not None:
+    # Only consume/decide the pending request when it belongs to the answering actor.  A request
+    # raised for a *different* required approver must stay pending so that approver can still decide;
+    # consuming it here would strand the proposal in awaiting_approval forever.
+    if request is not None and request.approver_id == actor_id:
         decided = replace(request, status="accepted", decided_at=now)
         decision = ApprovalDecision(
             request_id=request.request_id,
@@ -746,12 +781,24 @@ def _mark_missing_info_approved(
     return changed
 
 
-def _pending_request_for_actor(store: TeamTaskStore, proposal_id: str, actor_id: str):
+def _pending_request_for_actor(
+    store: TeamTaskStore,
+    proposal_id: str,
+    actor_id: str,
+    *,
+    required_approvers: tuple[str, ...] = (),
+):
     requests = store.list_approval_requests(proposal_id=proposal_id, approver_id=actor_id, status="pending")
     if requests:
         return requests[0]
+    # Fallback: never adopt a pending request that belongs to an unrelated approver.  Only surface a
+    # request whose approver is one of the proposal's required approvers (or the answering actor).
+    allowed = set(required_approvers) | {actor_id}
     requests = store.list_approval_requests(proposal_id=proposal_id, status="pending")
-    return requests[0] if requests else None
+    for request in requests:
+        if request.approver_id in allowed:
+            return request
+    return None
 
 
 def _deferred_missing_info_update(
@@ -762,7 +809,7 @@ def _deferred_missing_info_update(
 ) -> Proposal | None:
     text = message.text.strip()
     temporal = parse_temporal_update(text, reference_date=message.received_at.date())
-    if not temporal.get("defer_missing_slots") and not temporal.get("location_optional"):
+    if not temporal.get("defer_missing_slots") and not temporal.get(LOCATION_OPTIONAL_KEY):
         return None
     proposal = _find_pending_info_parent(store, text)
     if proposal is None:
@@ -770,26 +817,26 @@ def _deferred_missing_info_update(
 
     metadata = {
         **proposal.metadata,
-        "last_state_linked_update_type": "missing_info_deferred",
+        LAST_STATE_LINKED_UPDATE_TYPE_KEY: "missing_info_deferred",
         "last_deferred_update_message_id": message.message_id,
         "last_deferred_update_at": now.isoformat(timespec="seconds"),
     }
-    if temporal.get("location_optional"):
-        metadata["location_optional"] = temporal["location_optional"]
+    if temporal.get(LOCATION_OPTIONAL_KEY):
+        metadata[LOCATION_OPTIONAL_KEY] = temporal[LOCATION_OPTIONAL_KEY]
     if temporal.get("defer_missing_slots"):
         deferred_slots = csv_dedupe(temporal["defer_missing_slots"])
         if deferred_slots:
-            metadata["deferred_missing_slots"] = ",".join(deferred_slots)
-            metadata["deferred_reason"] = "not_decided"
+            metadata[DEFERRED_MISSING_SLOTS_KEY] = ",".join(deferred_slots)
+            metadata[DEFERRED_REASON_KEY] = "not_decided"
             metadata["deferred_at"] = now.isoformat(timespec="seconds")
-            metadata["deferred_until"] = default_deferred_until(
+            metadata[DEFERRED_UNTIL_KEY] = default_deferred_until(
                 proposal.scheduled_date or proposal.due_date,
                 changed_at=now,
             )
-            metadata["deferred_reminder_cadence_hours"] = "2"
+            metadata[DEFERRED_REMINDER_CADENCE_HOURS_KEY] = "2"
 
     changed = replace(proposal, metadata=metadata, updated_at=now)
-    changed = replace(changed, missing_slots=missing_slots_for_proposal(changed), updated_at=now)
+    changed = replace(changed, missing_slots=recompute_missing_slots(changed), updated_at=now)
     if changed == proposal:
         return None
     store.save_proposal(changed)
@@ -845,8 +892,8 @@ def _shares_pending_info_context(proposal: Proposal, text: str) -> bool:
                 "materials",
                 "parent_title",
                 "external_owner",
-                "external_participants",
-                "participant_label",
+                EXTERNAL_PARTICIPANTS_KEY,
+                PARTICIPANT_LABEL_KEY,
             }
         )
     )
@@ -1005,20 +1052,37 @@ def _raw_hangul_tokens(text: str) -> set[str]:
     return tokens
 
 
-def _presentation_materials_prep(
+@dataclass(frozen=True)
+class _PresentationMaterialsPrepMatch:
+    message: IncomingMessage
+    parent: Proposal
+    text: str
+    due_date: date
+
+
+def _match_presentation_materials_prep(
     store: TeamTaskStore,
     message: IncomingMessage,
-    *,
-    now: datetime,
-) -> Proposal | None:
+) -> _PresentationMaterialsPrepMatch | None:
     text = message.text.strip()
     if not _looks_like_presentation_materials_prep(text):
         return None
-    parent = _find_presentation_parent(store, text, reference_date=_target_date(text, message.received_at.date()))
+    due_date = _target_date(text, message.received_at.date())
+    parent = _find_presentation_parent(store, text, reference_date=due_date)
     if parent is None or _has_existing_prep(store, parent, text):
         return None
+    return _PresentationMaterialsPrepMatch(message=message, parent=parent, text=text, due_date=due_date)
 
-    due_date = _target_date(text, message.received_at.date())
+
+def _apply_presentation_materials_prep(
+    store: TeamTaskStore,
+    matched: _PresentationMaterialsPrepMatch,
+    now: datetime,
+) -> tuple[Proposal, ...]:
+    message = matched.message
+    parent = matched.parent
+    text = matched.text
+    due_date = matched.due_date
     title = _prep_title(parent)
     assignee = message.sender_id if message.sender_id in {"me", "teammate"} else parent.assigned_to
     if assignee not in {"me", "teammate"}:
@@ -1048,7 +1112,7 @@ def _presentation_materials_prep(
         metadata={
             **_source_metadata(message.message_id),
             "parent_proposal_id": parent.proposal_id,
-            "link_type": "prep_subtask",
+            LINK_TYPE_KEY: LINK_PREP_SUBTASK,
             "materials": "발표자료",
             "source_text_hash": _text_hash(text),
             "reconciler": "presentation_materials_prep.v1",
@@ -1063,15 +1127,24 @@ def _presentation_materials_prep(
         occurred_at=now,
     )
     store.append_event("proposal.approved", {"proposal": proposal, "generated": True, "reconciled": True}, occurred_at=now)
-    return proposal
+    return (proposal,)
 
 
-def _official_presentation_schedule_update(
+@dataclass(frozen=True)
+class _OfficialPresentationScheduleMatch:
+    message: IncomingMessage
+    parent: Proposal
+    text: str
+    scheduled_date: date
+    time_window: str
+    official_title: str
+    location: str
+
+
+def _match_official_presentation_schedule(
     store: TeamTaskStore,
     message: IncomingMessage,
-    *,
-    now: datetime,
-) -> Proposal | None:
+) -> _OfficialPresentationScheduleMatch | None:
     text = message.text.strip()
     parsed = _parse_official_presentation_schedule(text)
     if parsed is None:
@@ -1080,11 +1153,34 @@ def _official_presentation_schedule_update(
     parent = _find_official_schedule_parent(store, text, scheduled_date=scheduled_date)
     if parent is None:
         return None
+    return _OfficialPresentationScheduleMatch(
+        message=message,
+        parent=parent,
+        text=text,
+        scheduled_date=scheduled_date,
+        time_window=time_window,
+        official_title=official_title,
+        location=location,
+    )
+
+
+def _apply_official_presentation_schedule(
+    store: TeamTaskStore,
+    matched: _OfficialPresentationScheduleMatch,
+    now: datetime,
+) -> tuple[Proposal, ...]:
+    message = matched.message
+    parent = matched.parent
+    text = matched.text
+    scheduled_date = matched.scheduled_date
+    time_window = matched.time_window
+    official_title = matched.official_title
+    location = matched.location
 
     metadata = {
         **parent.metadata,
         "official_title": official_title,
-        "location": location,
+        LOCATION_KEY: location,
         "last_schedule_update_message_id": message.message_id,
         "last_schedule_update_at": now.isoformat(timespec="seconds"),
         "schedule_update_source_text_hash": _text_hash(text),
@@ -1093,16 +1189,16 @@ def _official_presentation_schedule_update(
             for key, value in _source_metadata(message.message_id).items()
         },
     }
-    metadata.pop("location_optional", None)
+    metadata.pop(LOCATION_OPTIONAL_KEY, None)
     title = _merged_official_event_title(parent, official_title)
     if (
         parent.title == title
         and parent.scheduled_date == scheduled_date
         and parent.time_window == time_window
-        and parent.metadata.get("location") == location
+        and parent.metadata.get(LOCATION_KEY) == location
         and parent.metadata.get("last_schedule_update_message_id") == message.message_id
     ):
-        return None
+        return ()
 
     updated = replace(
         parent,
@@ -1127,7 +1223,25 @@ def _official_presentation_schedule_update(
         },
         occurred_at=now,
     )
-    return updated
+    return (updated,)
+
+
+RECONCILER_RULES: tuple[ReconcilerRule, ...] = (
+    ReconcilerRule(
+        name="presentation_materials_prep.v1",
+        phase="create_followup",
+        priority=100,
+        match=_match_presentation_materials_prep,
+        apply=_apply_presentation_materials_prep,
+    ),
+    ReconcilerRule(
+        name="official_presentation_schedule.v1",
+        phase="update_existing",
+        priority=100,
+        match=_match_official_presentation_schedule,
+        apply=_apply_official_presentation_schedule,
+    ),
+)
 
 
 def _parse_official_presentation_schedule(text: str) -> tuple[date, str, str, str] | None:
@@ -1237,7 +1351,7 @@ def _shares_presentation_context(proposal: Proposal, text: str) -> bool:
 def _has_existing_prep(store: TeamTaskStore, parent: Proposal, text: str) -> bool:
     text_hash = _text_hash(text)
     for proposal in store.list_proposals():
-        if proposal.metadata.get("link_type") != "prep_subtask":
+        if proposal.metadata.get(LINK_TYPE_KEY) != LINK_PREP_SUBTASK:
             continue
         if proposal.metadata.get("parent_proposal_id") != parent.proposal_id:
             continue
@@ -1249,11 +1363,7 @@ def _has_existing_prep(store: TeamTaskStore, parent: Proposal, text: str) -> boo
 
 
 def _target_date(text: str, reference_date: date) -> date:
-    if "내일" in text:
-        return reference_date + timedelta(days=1)
-    if "어제" in text:
-        return reference_date - timedelta(days=1)
-    return reference_date
+    return relative_date(text, reference_date)
 
 
 def _prep_time_window(text: str) -> str:
@@ -1273,21 +1383,3 @@ def _prep_title(parent: Proposal) -> str:
 def _date_key(proposal: Proposal) -> str:
     proposal_date = proposal.scheduled_date or proposal.due_date
     return proposal_date.isoformat() if proposal_date else "9999-12-31"
-
-
-def _text_hash(text: str) -> str:
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
-
-
-def _source_metadata(message_id: str) -> dict[str, str]:
-    if not message_id.startswith("slack/"):
-        return {}
-    parts = message_id.split("/")
-    if len(parts) < 3:
-        return {"source_provider": "slack"}
-    return {
-        "source_provider": "slack",
-        "source_channel": parts[1],
-        "source_ts": parts[2],
-    }

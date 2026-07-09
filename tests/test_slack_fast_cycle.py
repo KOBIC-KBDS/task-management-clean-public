@@ -5,10 +5,19 @@ from pathlib import Path
 from typing import Sequence
 
 from task_management.domain import ApprovalRequest, IncomingMessage, Proposal
-from task_management.conflict_policy import parse_conflict_action
+from task_management.conflict_policy import apply_conflict_policy, parse_conflict_action
 from task_management.operating_agent import OperatingAgentDecision, ProposalDraft
 from task_management.orchestrator import TeamTaskOrchestrator
-from task_management.slack_adapter import FakeSlackWebClient, SlackDmAdapter, SlackDmConfig
+import pytest
+
+from task_management.cli import main
+from task_management.slack_adapter import (
+    FakeSlackWebClient,
+    SlackAdapterError,
+    SlackDmAdapter,
+    SlackDmConfig,
+    run_slack_dm_once,
+)
 from task_management.slack_fast_cycle import run_slack_fast_cycle
 from task_management.store import TeamTaskStore
 
@@ -368,8 +377,13 @@ def test_fast_cycle_mirrors_team_room_confirmations_to_personal_dm(tmp_path: Pat
     assert len(client.sent) == 1
     assert "[팀 공유 기록]" not in client.sent[0][2]
     assert "보고서 확인" in client.sent[0][2]
+    # The fallback dedupe key is salted with the triggering inbound message id so
+    # distinct inbound messages that reduce to the same stable key are not
+    # collapsed (BUG A1). The delivery is still recorded — under the salted key.
+    source_message_id = result.poll.messages[0].message_id
     assert store.has_outbound_delivery(
-        f"slack-outbound/me/{result.poll.outbound_messages[0].message_type}/{result.poll.outbound_messages[0].proposal_id}"
+        f"slack-outbound/me/{result.poll.outbound_messages[0].message_type}"
+        f"/{result.poll.outbound_messages[0].proposal_id}/{source_message_id}"
     )
     sent_event = next(event for event in store.read_events() if event["type"] == "slack.message.sent")
     assert sent_event["payload"]["original_surface"] == "team_room"
@@ -485,6 +499,97 @@ def test_rule_based_fast_cycle_turns_plain_trip_message_into_conflict_question(t
     assert result.poll.outbound_messages[0].message_type == "schedule_conflict"
     assert "_일정 충돌 확인이 필요합니다._" in client.sent[0][2]
     assert "*수요일 점심회식*" in client.sent[0][2]
+
+
+def _single_day_event(
+    proposal_id: str,
+    title: str,
+    *,
+    time_window: str,
+    status: str = "approved",
+    kind: str = "event",
+    when: date = date(2026, 5, 20),
+    metadata: dict[str, str] | None = None,
+) -> Proposal:
+    return Proposal(
+        proposal_id=proposal_id,
+        source_message_id=f"slack/DTEST/{proposal_id}",
+        proposer_id="me",
+        title=title,
+        raw_text=title,
+        kind=kind,
+        status=status,
+        assigned_to="me",
+        task_management_area="work",
+        discussion_id=f"private/DTEST/{proposal_id}",
+        message_id=f"slack/DTEST/{proposal_id}",
+        required_approvers=("me",),
+        approvals=("me",) if status == "approved" else (),
+        scheduled_date=when,
+        time_window=time_window,
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={"participants": "me", **(metadata or {})},
+    )
+
+
+def test_same_day_disjoint_exact_times_do_not_conflict(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    # Approved evening 회식 at a precise clock time on the same calendar day.
+    store.save_proposal(_single_day_event("proposal/dinner", "저녁 회식", time_window="19:00"))
+    # New single-day blocking 교육 in the morning with a precise clock time.
+    new_training = _single_day_event(
+        "proposal/training",
+        "리더십 교육",
+        time_window="09:00-12:00",
+        status="awaiting_approval",
+    )
+
+    held, requests, outbound = apply_conflict_policy(store, new_training, actor_id="me", now=NOW)
+
+    # Disjoint exact times -> no conflict; the proposal is returned untouched.
+    assert held is new_training
+    assert held.kind == "event"
+    assert held.metadata.get("conflict_detected") != "true"
+    assert requests == ()
+    assert outbound == ()
+
+
+def test_same_day_overlapping_exact_times_still_conflict(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.save_proposal(_single_day_event("proposal/dinner", "저녁 회식", time_window="11:30"))
+    new_training = _single_day_event(
+        "proposal/training",
+        "리더십 교육",
+        time_window="11:00-13:00",
+        status="awaiting_approval",
+    )
+
+    held, requests, outbound = apply_conflict_policy(store, new_training, actor_id="me", now=NOW)
+
+    assert held.kind == "question"
+    assert held.metadata["conflict_detected"] == "true"
+    assert held.metadata["conflict_with_proposal_ids"] == "proposal/dinner"
+    assert held.approvals == ()
+    assert requests and outbound
+
+
+def test_same_day_period_only_token_still_conflicts_conservatively(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    # Existing side carries a period-only token (오후) -> conservative date-level hold.
+    store.save_proposal(_single_day_event("proposal/dinner", "오후 회식", time_window="오후"))
+    new_training = _single_day_event(
+        "proposal/training",
+        "리더십 교육",
+        time_window="09:00-12:00",
+        status="awaiting_approval",
+    )
+
+    held, requests, outbound = apply_conflict_policy(store, new_training, actor_id="me", now=NOW)
+
+    assert held.kind == "question"
+    assert held.metadata["conflict_detected"] == "true"
+    assert held.metadata["conflict_with_proposal_ids"] == "proposal/dinner"
 
 
 def test_conflict_feedback_marks_old_event_not_attending_and_approves_trip(tmp_path: Path) -> None:
@@ -708,3 +813,93 @@ def test_contextual_feedback_updates_the_referenced_pending_tasks(tmp_path: Path
     assert "차주 복귀해서 확인할 일들 정리해두기 (2026-05-25 14:00)" in sent_text
     assert "06:00" not in sent_text
     assert ")전에 할 일이야" not in sent_text
+
+
+# --- BUG #15: a blocked-send instance fails closed BEFORE polling/last_ts advance ---
+
+
+def test_fast_cycle_send_refuses_before_polling_when_instance_guard_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ALLOWED_INSTANCE_ID set but INSTANCE_ID empty => can_send is False. A live
+    # --send fast-cycle must refuse BEFORE polling so the inbound DM is never
+    # marked seen and last_ts never advances (otherwise the reply is lost).
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_DM_CHANNEL_ID", "DTEST")
+    monkeypatch.setenv("TASK_MANAGEMENT_ALLOWED_INSTANCE_ID", "primary")
+    monkeypatch.delenv("TASK_MANAGEMENT_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("SLACK_USER_ID", raising=False)
+
+    state_dir = tmp_path / "state"
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            [
+                "--state",
+                str(state_dir),
+                "slack-fast-cycle",
+                "--now",
+                NOW.isoformat(),
+                "--dashboard-output",
+                str(tmp_path / "out" / "dashboard.html"),
+                "--send",
+            ]
+        )
+
+    assert "refused before polling" in str(excinfo.value)
+
+    # Nothing was polled, recorded, or advanced: no state and no polled events.
+    store = _store(state_dir)
+    assert store.get_integration_state("slack.dm.me.last_ts") is None
+    polled_events = [event for event in store.read_events() if event["type"] == "slack.message.polled"]
+    assert polled_events == []
+
+
+class _SendAlwaysFailsClient(FakeSlackWebClient):
+    def send_message(self, channel_id: str, text: str) -> str:
+        raise SlackAdapterError("transient Slack send failure")
+
+
+def test_run_slack_dm_once_keeps_last_ts_repollable_when_send_fails(tmp_path: Path) -> None:
+    # A send-side failure after polling must NOT advance last_ts, so the inbound
+    # message stays re-pollable instead of being permanently marked consumed.
+    store = _store(tmp_path)
+    client = _SendAlwaysFailsClient(
+        messages=[_slack_message("1000.000001", "내가 내일 보고서 확인할게")],
+        channel_id="DTEST",
+    )
+    config = SlackDmConfig(actor_id="me", dm_channel_id="DTEST")
+
+    with pytest.raises(SlackAdapterError):
+        run_slack_dm_once(
+            store=store,
+            orchestrator=TeamTaskOrchestrator(store),
+            adapter=SlackDmAdapter(config, client),
+            send=True,
+            now=NOW,
+        )
+
+    # last_ts must be unchanged so the next clean cycle re-polls the same message.
+    assert store.get_integration_state("slack.dm.me.last_ts") is None
+    # The failed reply is still queued (pending), not lost.
+    assert len(store.list_pending_outbound_messages(provider="slack")) == 1
+
+    # Once the send transport recovers, the next cycle re-polls the still-unseen
+    # message and drains the pending reply, delivering the previously-lost answer.
+    healthy_client = FakeSlackWebClient(
+        messages=[_slack_message("1000.000001", "내가 내일 보고서 확인할게")],
+        channel_id="DTEST",
+    )
+    retry = run_slack_fast_cycle(
+        store=store,
+        orchestrator=TeamTaskOrchestrator(store),
+        adapter=SlackDmAdapter(config, healthy_client),
+        now=NOW.replace(minute=5),
+        dashboard_output=tmp_path / "out" / "dashboard.html",
+        send=True,
+    )
+
+    assert len(retry.messages) == 1
+    assert len(healthy_client.sent) == 1
+    assert store.list_pending_outbound_messages(provider="slack") == ()
+    assert store.get_integration_state("slack.dm.me.last_ts") == "1000.000001"
