@@ -7,6 +7,7 @@ from .domain import KIND_SPECS, Proposal
 
 OPEN_STATUSES = frozenset({"draft", "posted", "awaiting_approval", "approved", "applied"})
 PROGRESS_CONFIRMATION_STATUSES = frozenset({"approved", "applied"})
+SURFACE_EXCLUDED_STATUSES = frozenset({"rejected"})
 
 # Mirrors ``relations.PARTICIPANTS_KEY``. Inlined to keep this module's import
 # footprint at ``domain`` only (importing ``relations`` would form a cycle via
@@ -16,6 +17,17 @@ _PARTICIPANTS_KEY = "participants"
 
 def is_open_work_item(proposal: Proposal) -> bool:
     return proposal.status in OPEN_STATUSES
+
+
+def is_surface_visible_item(proposal: Proposal) -> bool:
+    """Return True when a proposal should appear on current-work surfaces.
+
+    Rejected proposals remain in audit/status/preview counts, but they are not
+    active schedule/work items and should not be shown in Home, briefings,
+    monthly pages, dashboard work sections, or hierarchy child rollups.
+    """
+
+    return proposal.status not in SURFACE_EXCLUDED_STATUSES
 
 
 def schedule_first_date(proposal: Proposal) -> date | None:

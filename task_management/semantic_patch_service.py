@@ -34,6 +34,7 @@ from datetime import datetime
 import re
 from typing import Callable
 
+from .approval_flow import record_decision
 from .completion_linker import related_commitments
 from .conflict_policy import recompute_missing_slots
 from .deferred_policy import csv_dedupe, default_deferred_until
@@ -147,6 +148,12 @@ class SemanticPatchService:
                     accepted=False,
                     decided_at=changed_at,
                 )
+            elif patch.request_id and _is_completion_update(patch.temporal_update):
+                result = self._handle_request_completion_patch(
+                    patch,
+                    actor_id=actor_id,
+                    changed_at=changed_at,
+                )
             elif patch.request_id:
                 result = self._route_feedback(
                     request_id=patch.request_id,
@@ -193,6 +200,10 @@ class SemanticPatchService:
                 return "actor_not_authorized_for_direct_patch"
             if not _meaningful_semantic_update(patch.temporal_update):
                 return "empty_semantic_update"
+            if _is_completion_update(patch.temporal_update):
+                if proposal.status == "rejected":
+                    return "target_not_completable"
+                return ""
             if _requires_actionable_direct_patch(patch.temporal_update) and (
                 proposal.status not in {"approved", "applied"} or proposal.missing_slots
             ):
@@ -208,6 +219,8 @@ class SemanticPatchService:
         if patch.proposal_id and request.proposal_id != patch.proposal_id:
             return "proposal_request_mismatch"
         proposal = self.store.get_proposal(request.proposal_id)
+        if proposal is not None and _is_completion_update(patch.temporal_update) and proposal.status == "rejected":
+            return "target_not_completable"
         if proposal is not None and _looks_like_unrelated_new_work_patch(patch, proposal):
             return "target_mismatch_new_work"
         return ""
@@ -484,6 +497,39 @@ class SemanticPatchService:
             outbound_messages=(_semantic_direct_update_message(updated, actor_id=actor_id),),
         )
 
+    def _handle_request_completion_patch(
+        self,
+        patch: ProposalPatch,
+        *,
+        actor_id: str,
+        changed_at: datetime,
+    ) -> OrchestrationResult:
+        request = self.store.get_approval_request(patch.request_id)
+        if request is None:
+            return OrchestrationResult()
+        proposal = self.store.get_proposal(request.proposal_id)
+        if proposal is None:
+            return OrchestrationResult()
+        decided_request, _decision = record_decision(
+            self.store,
+            request,
+            approver_id=actor_id,
+            accepted=True,
+            decided_at=changed_at,
+        )
+        completion_patch = replace(patch, proposal_id=proposal.proposal_id)
+        result = self._handle_direct_completion_patch(
+            completion_patch,
+            actor_id=actor_id,
+            changed_at=changed_at,
+            proposal=proposal,
+        )
+        return OrchestrationResult(
+            proposals=result.proposals,
+            approval_requests=(decided_request,),
+            outbound_messages=result.outbound_messages,
+        )
+
 
 def _apply_temporal_change(
     proposal: Proposal,
@@ -656,6 +702,10 @@ def _is_approval_rejection_update(update: dict[str, str]) -> bool:
     status = update.get("status", "").strip().lower()
     update_type = update.get("semantic_update_type", "").strip().lower()
     return status in {"rejected", "reject"} or update_type in {"rejection", "approval_rejection"}
+
+
+def _is_completion_update(update: dict[str, str]) -> bool:
+    return update.get("status") == "done" or update.get("semantic_update_type") == "completion"
 
 
 def _requires_actionable_direct_patch(update: dict[str, str]) -> bool:

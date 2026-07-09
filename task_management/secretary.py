@@ -41,6 +41,7 @@ from .store import TeamTaskStore
 from .work_item_state import (
     is_past_scheduled_commitment,
     is_personal_scope,
+    is_surface_visible_item,
     needs_time_resolution,
     requires_progress_confirmation,
     schedule_first_date,
@@ -157,7 +158,9 @@ def build_morning_briefing(
         return ()
 
     all_proposals = list(store.list_proposals())
-    proposals = [proposal for proposal in all_proposals if _is_personal_scope(proposal, actor_id)]
+    proposals = [
+        proposal for proposal in all_proposals if _is_personal_scope(proposal, actor_id) and is_surface_visible_item(proposal)
+    ]
     due_tasks = [
         proposal
         for proposal in proposals
@@ -181,6 +184,7 @@ def build_morning_briefing(
     pending_requests = [
         (request, store.get_proposal(request.proposal_id))
         for request in store.list_approval_requests(approver_id=actor_id, status="pending")
+        if (proposal := store.get_proposal(request.proposal_id)) is None or is_surface_visible_item(proposal)
     ]
     pending = [proposal for _, proposal in pending_requests if proposal is not None and proposal.missing_slots]
     attention_items = collect_human_attention_items(
@@ -275,7 +279,9 @@ def build_afternoon_briefing(
         return ()
 
     all_proposals = list(store.list_proposals())
-    proposals = [proposal for proposal in all_proposals if _is_personal_scope(proposal, actor_id)]
+    proposals = [
+        proposal for proposal in all_proposals if _is_personal_scope(proposal, actor_id) and is_surface_visible_item(proposal)
+    ]
     week_end = today + timedelta(days=6)
     today_open = [
         proposal
@@ -297,6 +303,7 @@ def build_afternoon_briefing(
     pending_requests = [
         (request, store.get_proposal(request.proposal_id))
         for request in store.list_approval_requests(approver_id=actor_id, status="pending")
+        if (proposal := store.get_proposal(request.proposal_id)) is None or is_surface_visible_item(proposal)
     ]
     attention_items = collect_human_attention_items(
         proposals,
@@ -453,7 +460,11 @@ def build_end_of_day_review(
     if reserve and store.has_outbound_delivery(dedupe_key):
         return ()
 
-    proposals = [proposal for proposal in store.list_proposals() if _is_personal_scope(proposal, actor_id)]
+    proposals = [
+        proposal
+        for proposal in store.list_proposals()
+        if _is_personal_scope(proposal, actor_id) and is_surface_visible_item(proposal)
+    ]
     due_open = [
         proposal
         for proposal in proposals
@@ -622,7 +633,7 @@ def _proposal_lines(
     if not proposals:
         return [empty]
     visible_ids = {proposal.proposal_id for proposal in proposals}
-    all_items = all_proposals or proposals
+    all_items = [proposal for proposal in (all_proposals or proposals) if is_surface_visible_item(proposal)]
     all_by_id = {proposal.proposal_id: proposal for proposal in all_items}
     lines: list[str] = []
     seen: set[str] = set()
@@ -637,7 +648,7 @@ def _proposal_lines(
             continue
         seen.add(anchor.proposal_id)
         lines.append(_proposal_line(anchor, today=today))
-        all_children = child_proposals(anchor, all_items)
+        all_children = tuple(child for child in child_proposals(anchor, all_items) if is_surface_visible_item(child))
         visible_children = display_children(all_children, max_completed_children=2)
         if all_children:
             lines.append(_subtask_summary_line(all_children, visible_children))

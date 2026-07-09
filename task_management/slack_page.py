@@ -24,7 +24,7 @@ from .human_view import (
 )
 from .sort_keys import schedule_first_sort_key
 from .store import TeamTaskStore
-from .work_item_state import is_personal_scope, schedule_first_date
+from .work_item_state import is_personal_scope, is_surface_visible_item, schedule_first_date
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ def build_slack_monthly_task_page_model(
     month_start, month_end = _month_bounds(month)
     proposals = store.list_proposals()
     proposal_by_id = {item.proposal_id: item for item in proposals}
-    scoped = tuple(item for item in proposals if _is_personal_scope(item, actor_id))
+    scoped = tuple(item for item in proposals if _is_personal_scope(item, actor_id) and is_surface_visible_item(item))
 
     approved = tuple(
         sorted(
@@ -69,6 +69,7 @@ def build_slack_monthly_task_page_model(
     pending_approvals = tuple(
         (request, proposal_by_id.get(request.proposal_id))
         for request in store.list_approval_requests(approver_id=actor_id, status="pending")
+        if _request_surface_visible(request, proposal_by_id)
     )
     floating = tuple(
         sorted(
@@ -198,6 +199,11 @@ def _month_bounds(month: date) -> tuple[date, date]:
 _proposal_date = schedule_first_date
 _sort_key = schedule_first_sort_key
 _is_personal_scope = is_personal_scope
+
+
+def _request_surface_visible(request: ApprovalRequest, proposals_by_id: dict[str, Proposal]) -> bool:
+    proposal = proposals_by_id.get(request.proposal_id)
+    return proposal is None or is_surface_visible_item(proposal)
 
 
 def _when_label(proposal: Proposal | None) -> str:

@@ -306,6 +306,74 @@ def test_orchestrator_applies_semantic_rejection_to_pending_approval(tmp_path: P
     assert "proposal.rejected" in events
 
 
+def test_direct_completion_can_close_missing_date_item(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    proposal, _request = _pending("회의 결과 정리", "proposal/no-date", "approval/no-date")
+    store.save_proposal(proposal)
+    agent = StaticPatchAgent(
+        (
+            ProposalPatch(
+                request_id="",
+                proposal_id=proposal.proposal_id,
+                actor_id="me",
+                body="회의 결과 정리 끝났어",
+                temporal_update={"status": "done", "semantic_update_type": "completion"},
+                reason="explicit_completion",
+                target_confidence=0.97,
+                evidence_text="회의 결과 정리 끝났어",
+            ),
+        )
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=agent).handle_message(_message("회의 결과 정리 끝났어"))
+
+    assert result.proposals[0].status == "done"
+    completed = store.get_proposal(proposal.proposal_id)
+    assert completed is not None
+    assert completed.status == "done"
+    assert completed.missing_slots == ()
+    assert completed.metadata["completed_by"] == "me"
+    events = [event["type"] for event in store.read_events()]
+    assert "agent.patch.accepted" in events
+    assert "proposal.completed" in events
+    assert "agent.patch.rejected" not in events
+
+
+def test_request_scoped_completion_closes_missing_slot_request(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    proposal, request = _pending("회의 결과 정리", "proposal/no-date-request", "approval/no-date-request")
+    _seed(store, proposal, request)
+    agent = StaticPatchAgent(
+        (
+            ProposalPatch(
+                request_id=request.request_id,
+                proposal_id=proposal.proposal_id,
+                actor_id="me",
+                body="완료했어",
+                temporal_update={"status": "done", "semantic_update_type": "completion"},
+                reason="explicit_completion",
+                target_confidence=0.97,
+                evidence_text="완료했어",
+            ),
+        )
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=agent).handle_message(_message("완료했어"))
+
+    assert result.proposals[0].status == "done"
+    assert result.approval_requests[0].status == "accepted"
+    completed = store.get_proposal(proposal.proposal_id)
+    decided = store.get_approval_request(request.request_id)
+    assert completed is not None
+    assert completed.status == "done"
+    assert completed.missing_slots == ()
+    assert decided is not None
+    assert decided.status == "accepted"
+    events = [event["type"] for event in store.read_events()]
+    assert "approval.accepted" in events
+    assert "proposal.completed" in events
+
+
 def test_orchestrator_rejects_low_confidence_semantic_patch_without_mutating(tmp_path: Path) -> None:
     store = _store(tmp_path)
     proposal, request = _pending("어느 작업인지 헷갈리는 일정", "proposal/ambiguous", "approval/ambiguous")

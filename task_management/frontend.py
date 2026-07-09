@@ -39,7 +39,12 @@ from .relations import (
 from .sort_keys import proposal_deadline_sort_key
 from .store import TeamTaskStore
 from .timeline import proposal_timeline
-from .work_item_state import is_open_work_item, needs_time_resolution, work_item_urgency_label
+from .work_item_state import (
+    is_open_work_item,
+    is_surface_visible_item,
+    needs_time_resolution,
+    work_item_urgency_label,
+)
 
 
 SURFACE_ROLES: dict[str, dict[str, str]] = {
@@ -149,16 +154,20 @@ def build_web_task_page_model(
     events = store.read_events()
     applied_exports = store.list_applied_exports()
     week_end = today + timedelta(days=6)
-    sorted_proposals = sorted(proposals, key=lambda item: proposal_deadline_sort_key(item, today=today, overdue_last=True))
+    surface_proposals = tuple(item for item in proposals if is_surface_visible_item(item))
+    sorted_proposals = sorted(
+        surface_proposals,
+        key=lambda item: proposal_deadline_sort_key(item, today=today, overdue_last=True),
+    )
     proposal_views = {
-        item.proposal_id: _proposal_view(item, applied_exports.get(item.proposal_id), today=today, events=events, proposals=proposals)
+        item.proposal_id: _proposal_view(item, applied_exports.get(item.proposal_id), today=today, events=events, proposals=surface_proposals)
         for item in sorted_proposals
     }
 
     sections = {
         "today": _hierarchy_section(
             [item for item in sorted_proposals if _belongs_in_today_section(item, today=today)],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
@@ -170,22 +179,26 @@ def build_web_task_page_model(
                 and (proposal_date := _proposal_date(item)) is not None
                 and today <= proposal_date <= week_end
             ],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
-        "pending_approvals": [_request_view(request, proposals) for request in pending_requests],
-        "questions": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "questions"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
+        "pending_approvals": [
+            _request_view(request, proposals)
+            for request in pending_requests
+            if _request_surface_visible(request, proposals)
+        ],
+        "questions": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "questions"], proposals=surface_proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
         "floating": _hierarchy_section(
             [item for item in sorted_proposals if item.status in {"draft", "posted", "awaiting_approval"} or item.missing_slots],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
-        "routines": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "routines"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
+        "routines": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "routines"], proposals=surface_proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
         "prep_subtasks": _hierarchy_section(
             [item for item in sorted_proposals if item.metadata.get(LINK_TYPE_KEY) == LINK_PREP_SUBTASK],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
@@ -199,11 +212,11 @@ def build_web_task_page_model(
             for event in events
             if str(event.get("type", "")).startswith("reminder.")
         ],
-        "references": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "references"], proposals=proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
-        "by_assignee": _by_assignee(proposals, applied_exports, today=today),
+        "references": _hierarchy_section([item for item in sorted_proposals if KIND_SPECS[item.kind].dashboard_section == "references"], proposals=surface_proposals, proposal_views=proposal_views, max_completed_children=max_completed_children),
+        "by_assignee": _by_assignee(surface_proposals, applied_exports, today=today),
         "done": _hierarchy_section(
             [item for item in sorted_proposals if item.status in {"done", "applied"}],
-            proposals=proposals,
+            proposals=surface_proposals,
             proposal_views=proposal_views,
             max_completed_children=max_completed_children,
         ),
@@ -219,12 +232,12 @@ def build_web_task_page_model(
             "total": len(proposals),
             "approved": len([item for item in proposals if item.status == "approved"]),
             "awaiting_approval": len([item for item in proposals if item.status == "awaiting_approval"]),
-            "questions": len([item for item in proposals if KIND_SPECS[item.kind].dashboard_section == "questions"]),
+            "questions": len(sections["questions"]),
             "floating": len(sections["floating"]),
             "routines": len(sections["routines"]),
             "prep_subtasks": len(sections["prep_subtasks"]),
             "reminders": len(sections["reminders"]),
-            "references": len([item for item in proposals if KIND_SPECS[item.kind].dashboard_section == "references"]),
+            "references": len(sections["references"]),
             "done": len([item for item in proposals if item.status in {"done", "applied"}]),
             "preview_ready": preview_counts["ready"],
             "preview_blocked": preview_counts["blocked"],
@@ -1086,6 +1099,11 @@ def _request_view(request: ApprovalRequest, proposals: tuple[Proposal, ...]) -> 
     }
 
 
+def _request_surface_visible(request: ApprovalRequest, proposals: tuple[Proposal, ...]) -> bool:
+    proposal = next((item for item in proposals if item.proposal_id == request.proposal_id), None)
+    return proposal is None or is_surface_visible_item(proposal)
+
+
 def _by_assignee(
     proposals: tuple[Proposal, ...],
     applied_exports: dict[str, dict[str, str]],
@@ -1117,7 +1135,7 @@ def _hierarchy_section(
             continue
         seen.add(anchor.proposal_id)
         item = dict(proposal_views[anchor.proposal_id])
-        all_children = child_proposals(anchor, proposals)
+        all_children = tuple(child for child in child_proposals(anchor, proposals) if is_surface_visible_item(child))
         children_to_render = display_children(all_children, max_completed_children=max_completed_children)
         children = [
             dict(proposal_views[child.proposal_id])

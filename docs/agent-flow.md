@@ -32,10 +32,12 @@ The older flow treated the semantic decision as mostly create/update followed by
 5. **Surface rollup.** Slack Home, briefings, and the web dashboard anchor child items under workflow context parents, suppress parent-only dates/overdue flags, show only the two most recent completed children, and show hidden-completed counts.
 6. **Outbound dedupe audit.** Duplicate outbound Slack cards are skipped through stable dedupe keys and now emit an explicit `slack.message.skipped` audit event with reason `duplicate_dedupe_key`.
 7. **Task/event commitment collapse.** If the same commitment is represented twice as a task and an event with the same normalized title, date, and time window, the normalizer keeps one canonical visible proposal and marks the duplicate as a rejected merge record with `merged_into_proposal_id`.
-8. **Pending-card hijack protection.** A lone pending clarification no longer owns every later private message. The deterministic layer accepts explicit rejections, checks semantic target evidence, and reroutes unrelated meeting-like patches through new-work intake.
-9. **Provider-generic outbound path.** Renderers create `OutboundMessage` objects; `outbound_delivery.py` handles queue/send/dedupe flow behind a provider transport so Slack remains a thin wrapper rather than the architecture center.
-10. **Runtime resilience.** Socket reconnect backoff, fast-cycle guards, deferred reminder ticking, and transient Slack send retries keep clean deployments closer to the live operating shape without committing live state.
-11. **Shared engineering memory.** Refactoring handoffs should update `docs/shared-context.md` with public-safe decisions, verification, and watchpoints so Codex, Claude Code, and human maintainers share the same current context.
+8. **Rejected-work surface boundary.** Rejected proposals remain in audit/status counts, but a shared `is_surface_visible_item(...)` gate keeps them out of current schedules, pending confirmation cards, hierarchy children, Slack digests, Home, briefings, monthly pages, and the web dashboard.
+9. **Terminal completion with unresolved slots.** A semantic completion update can close an item even when the date or time was never resolved. If the completion is scoped to a pending request, the request is closed first and then the target proposal is marked done.
+10. **Pending-card hijack protection.** A lone pending clarification no longer owns every later private message. The deterministic layer accepts explicit rejections, checks semantic target evidence, and reroutes unrelated meeting-like patches through new-work intake.
+11. **Provider-generic outbound path.** Renderers create `OutboundMessage` objects; `outbound_delivery.py` handles queue/send/dedupe flow behind a provider transport so Slack remains a thin wrapper rather than the architecture center.
+12. **Runtime resilience.** Socket reconnect backoff, fast-cycle guards, deferred reminder ticking, and transient Slack send retries keep clean deployments closer to the live operating shape without committing live state.
+13. **Shared engineering memory.** Refactoring handoffs should update `docs/shared-context.md` with public-safe decisions, verification, and watchpoints so Codex, Claude Code, and human maintainers share the same current context.
 
 ## Runtime intervention points
 
@@ -107,7 +109,9 @@ flowchart TD
   A[Incoming message with pending approvals] --> B[Semantic agent returns patch]
   B --> C{Patch is explicit approval rejection?}
   C -->|Yes| D[Close approval request and proposal as rejected]
-  C -->|No| E{Target confidence and evidence pass?}
+  C -->|No| T{Patch is terminal completion?}
+  T -->|Yes| U[Close pending request if present and mark target done]
+  T -->|No| E{Target confidence and evidence pass?}
   E -->|No| F[Reject patch without mutating target]
   E -->|Yes| G{Looks like unrelated new work?}
   G -->|No| H[Apply feedback to target]
@@ -115,6 +119,7 @@ flowchart TD
   I --> J[Run new-work intake without pending request pressure]
   J --> K[Create standalone task/event if parser finds one]
   D --> L[Render surfaces without missing-slot pressure]
+  U --> L
   F --> L
   H --> L
   K --> L
@@ -123,8 +128,10 @@ flowchart TD
 Practical interpretation:
 
 - A reply such as `reject approval/...` or a semantic `status=rejected` patch is a terminal approval decision, not an unsupported status update.
+- A completion patch is also terminal: it can close a pending request and mark the target done even when the original item was missing a date or time.
 - A message with a concrete time/place and meeting-like wording must not mutate an unrelated pending question unless it also carries credible target evidence.
 - If the semantic agent over-targets the pending card, deterministic code records the mismatch and gives the same message a second chance as a new item.
+- Rejected proposals are audit records, not active work: they stay available for counts/history but do not render as current schedule items, pending cards, or hierarchy children.
 - Rejected and done proposals are excluded from task-core preview readiness rather than appearing as blocked work.
 - Plain `question` proposals do not need dates unless the source item explicitly asks for exact-date resolution.
 
@@ -221,6 +228,7 @@ Surface rules are intentionally consistent across Slack Home, proactive briefing
 - Older completed children are counted as hidden rather than expanding the current-work view.
 - Parent workflow containers are context anchors, so their own date/time/overdue labels are suppressed when children exist.
 - Current work sorts by deadline, with overdue work moved behind non-overdue same-section work where supported.
+- Rejected items are suppressed from current-work sections and child rollups even if they still contribute to audit/status summaries.
 
 ## Outbound Slack and dedupe flow
 

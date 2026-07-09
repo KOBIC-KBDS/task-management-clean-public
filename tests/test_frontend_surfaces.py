@@ -167,17 +167,20 @@ def test_web_task_page_exposes_preview_readiness_and_applied_exports(tmp_path) -
     ready_item = next(item for item in model["sections"]["this_week"] if item["proposal_id"] == approved.proposal_id)
     blocked_item = next(item for item in model["sections"]["questions"] if item["proposal_id"] == pending.proposal_id)
     applied_item = next(item for item in model["sections"]["this_week"] if item["proposal_id"] == applied.proposal_id)
-    rejected_item = next(
-        item for item in model["sections"]["questions"] if item["proposal_id"] == rejected.proposal_id
-    )
     assert ready_item["preview_status"] == "ready"
     assert ready_item["preview_label"] == "export 후보"
     assert blocked_item["preview_status"] == "blocked"
     assert blocked_item["preview_label"] == "확인 필요"
     assert applied_item["preview_status"] == "applied"
     assert applied_item["export_item_id"] == "task_management-preview-001"
-    assert rejected_item["preview_status"] == "excluded"
-    assert rejected_item["preview_label"] == "preview 제외"
+    section_ids = {
+        item["proposal_id"]
+        for section_name, section in model["sections"].items()
+        if section_name not in {"reminders", "pending_approvals"}
+        for item in section
+        if isinstance(item, dict) and item.get("proposal_id")
+    }
+    assert rejected.proposal_id not in section_ids
 
     html = render_web_task_page_html(model)
     assert "Export 후보" in html
@@ -186,6 +189,7 @@ def test_web_task_page_exposes_preview_readiness_and_applied_exports(tmp_path) -
     assert 'data-preview="ready"' in html
     assert 'data-preview="blocked"' in html
     assert 'data-preview="applied"' in html
+    assert rejected.title not in html
 
 
 def test_date_window_is_visible_in_kakao_card_and_web_model(tmp_path) -> None:
@@ -372,6 +376,121 @@ def test_slack_home_today_section_includes_open_overdue_items(tmp_path) -> None:
     assert 'data-overdue="true"' in html
     assert "마감 지남" in html
     assert 'task-row[data-overdue="true"]' not in html
+
+
+def test_slack_home_today_section_includes_past_scheduled_commitments(tmp_path) -> None:
+    sim = TeamTaskSimulator(tmp_path)
+    sim.store.save_proposal(
+        Proposal(
+            proposal_id="proposal/past-event",
+            source_message_id="slack/DTEST/past-event",
+            proposer_id="me",
+            title="어제 스터디 진행",
+            raw_text="어제 스터디 진행",
+            kind="event",
+            status="approved",
+            assigned_to="me",
+            task_management_area="work",
+            discussion_id="DTEST",
+            message_id="slack/DTEST/past-event",
+            required_approvers=("me",),
+            approvals=("me",),
+            scheduled_date=date(2026, 5, 4),
+            time_window="14:00",
+            created_at=NOW,
+            updated_at=NOW,
+            metadata={"participants": "me"},
+        )
+    )
+    sim.store.save_proposal(
+        Proposal(
+            proposal_id="proposal/done-past-event",
+            source_message_id="slack/DTEST/done-past-event",
+            proposer_id="me",
+            title="완료된 어제 미팅",
+            raw_text="완료된 어제 미팅",
+            kind="event",
+            status="done",
+            assigned_to="me",
+            task_management_area="work",
+            discussion_id="DTEST",
+            message_id="slack/DTEST/done-past-event",
+            required_approvers=("me",),
+            approvals=("me",),
+            scheduled_date=date(2026, 5, 4),
+            created_at=NOW,
+            updated_at=NOW,
+            metadata={"participants": "me"},
+        )
+    )
+
+    model = build_web_task_page_model(sim.store, today=NOW.date())
+    item = next(item for item in model["sections"]["today"] if item["title"] == "어제 스터디 진행")
+
+    assert item["kind"] == "event"
+    assert item["is_overdue"] == "true"
+    assert item["urgency_label"] == "일정 지남 · 결과 확인 필요"
+    assert "완료된 어제 미팅" not in {item["title"] for item in model["sections"]["today"]}
+
+    view = build_slack_home_view(sim.store, now=NOW)
+    today_text = next(
+        block["text"]["text"]
+        for block in view["blocks"]
+        if block.get("type") == "section" and block["text"]["text"].startswith("*오늘*")
+    )
+    assert "어제 스터디 진행" in today_text
+    assert "🔴 일정 지남 · 결과 확인 필요" in today_text
+    assert "완료된 어제 미팅" not in today_text
+
+    html = render_web_task_page_html(model)
+    assert "일정 지남 · 결과 확인 필요" in html
+
+
+def test_rejected_scheduled_items_do_not_surface_as_current_schedule(tmp_path) -> None:
+    sim = TeamTaskSimulator(tmp_path)
+    sim.store.save_proposal(
+        Proposal(
+            proposal_id="proposal/rejected-event",
+            source_message_id="slack/DTEST/rejected-event",
+            proposer_id="me",
+            title="거절한 오후 회의",
+            raw_text="거절한 오후 회의",
+            kind="event",
+            status="rejected",
+            assigned_to="me",
+            task_management_area="work",
+            discussion_id="DTEST",
+            message_id="slack/DTEST/rejected-event",
+            scheduled_date=NOW.date(),
+            time_window="15:00",
+            created_at=NOW,
+            updated_at=NOW,
+            metadata={"participants": "me"},
+        )
+    )
+
+    model = build_web_task_page_model(sim.store, today=NOW.date())
+
+    assert model["status_counts"]["rejected"] == 1
+    assert model["preview_counts"]["excluded"] == 1
+    assert all(item["proposal_id"] != "proposal/rejected-event" for item in model["sections"]["today"])
+    assert all(item["proposal_id"] != "proposal/rejected-event" for item in model["sections"]["this_week"])
+    assert all(
+        item["proposal_id"] != "proposal/rejected-event"
+        for items in model["sections"]["by_assignee"].values()
+        for item in items
+    )
+
+    view = build_slack_home_view(sim.store, now=NOW)
+    rendered = "\n".join(
+        block["text"]["text"]
+        for block in view["blocks"]
+        if block.get("type") == "section"
+    )
+    assert "거절한 오후 회의" not in rendered
+
+    html = render_web_task_page_html(model)
+    assert "거절한 오후 회의" not in html
 
 
 def test_home_and_web_task_page_show_progress_state(tmp_path) -> None:

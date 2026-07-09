@@ -12,7 +12,7 @@ from .human_view import (
 )
 from .sort_keys import schedule_first_sort_key
 from .store import TeamTaskStore
-from .work_item_state import is_personal_scope, schedule_first_date
+from .work_item_state import is_personal_scope, is_surface_visible_item, schedule_first_date
 
 
 def build_today_update_digest(
@@ -27,7 +27,11 @@ def build_today_update_digest(
     """Render a concise Slack DM digest for the current personal task cycle."""
 
     today = now.date()
-    proposals = [proposal for proposal in store.list_proposals() if _is_personal_scope(proposal, actor_id)]
+    proposals = [
+        proposal
+        for proposal in store.list_proposals()
+        if _is_personal_scope(proposal, actor_id) and is_surface_visible_item(proposal)
+    ]
     touched = [proposal for proposal in proposals if _is_touched_today(proposal, today)]
     confirmed = [
         proposal

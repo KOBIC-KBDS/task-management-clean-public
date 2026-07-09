@@ -151,6 +151,19 @@ def test_slack_monthly_page_orders_same_day_items_by_clock_minutes(tmp_path) -> 
     ]
 
 
+def test_slack_monthly_page_excludes_rejected_scheduled_items(tmp_path) -> None:
+    store = _store(tmp_path)
+    store.save_proposal(_proposal("proposal/approved", "확정된 오후 회의"))
+    store.save_proposal(_proposal("proposal/rejected", "거절한 오후 회의", status="rejected"))
+
+    model = build_slack_monthly_task_page_model(store, actor_id="me", month=date(2026, 5, 1))
+    markdown = render_slack_monthly_task_page_markdown(model)
+
+    assert [item.proposal_id for item in model.approved] == ["proposal/approved"]
+    assert "확정된 오후 회의" in markdown
+    assert "거절한 오후 회의" not in markdown
+
+
 def test_render_slack_monthly_page_cli_writes_markdown(tmp_path) -> None:
     state = tmp_path / "state"
     store = TeamTaskStore(state / "task_management.sqlite3", state / "events.jsonl")
