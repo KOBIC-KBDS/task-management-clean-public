@@ -1,7 +1,7 @@
 # Architecture Inventory: task-management-public-release
 
 - Target repo: `<repo-root>`
-- Generated at: `2026-06-13T12:02:13Z`
+- Generated at: `2026-07-30T05:12:49Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Overview Diagram
@@ -11,7 +11,7 @@ flowchart TD
   repo["task-management-public-release"]
   module_task_management["task_management (65 files)"]
   repo --> module_task_management
-  module_tests["tests (28 files)"]
+  module_tests["tests (29 files)"]
   repo --> module_tests
   module_docs["docs (15 files)"]
   repo --> module_docs
@@ -35,10 +35,10 @@ flowchart TD
 
 | Item | Value |
 | --- | --- |
-| Files scanned | 138 |
-| Skipped paths | 15 |
+| Files scanned | 139 |
+| Skipped paths | 16 |
 | Entrypoints detected | 1 |
-| Cheap dependency edges | 661 |
+| Cheap dependency edges | 672 |
 
 
 ## Top-level Modules
@@ -46,7 +46,7 @@ flowchart TD
 | Item | Value |
 | --- | --- |
 | task_management | 65 files |
-| tests | 28 files |
+| tests | 29 files |
 | docs | 15 files |
 | ops | 12 files |
 | example_task_management.egg-info | 6 files |
@@ -66,7 +66,7 @@ flowchart TD
 | HTML | 4 |
 | JSON | 4 |
 | Markdown | 18 |
-| Python | 93 |
+| Python | 94 |
 | Shell | 1 |
 | TOML | 1 |
 

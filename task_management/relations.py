@@ -33,6 +33,11 @@ DEPENDS_ON_SOURCE_KEYS_KEY = "depends_on_source_keys"
 STEP_INDEX_KEY = "step_index"
 STEP_COUNT_KEY = "step_count"
 
+# Existing-workflow semantic mutation keys.
+WORKFLOW_RELATION_ACTION_KEY = "relation_action"
+WORKFLOW_CHILD_PROPOSAL_IDS_KEY = "child_proposal_ids"
+WORKFLOW_DETACH_CHILDREN_ACTION = "detach_children"
+
 # Deferral metadata (semantic agent -> deterministic core).
 DEFERRED_UNTIL_KEY = "deferred_until"
 DEFERRED_MISSING_SLOTS_KEY = "deferred_missing_slots"

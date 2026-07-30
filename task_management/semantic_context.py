@@ -21,6 +21,7 @@ from .relations import (
 
 from dataclasses import asdict
 from datetime import date, datetime
+import re
 from typing import Any, Sequence
 
 from .domain import (
@@ -50,6 +51,12 @@ def build_operating_agent_context(
 
     pending_requests = tuple(pending_approval_requests)
     request_ids_by_proposal = _request_ids_by_proposal(pending_requests)
+    context_proposals = _select_context_proposals(
+        message,
+        tuple(pending_proposals),
+        pending_requests=pending_requests,
+    )
+    index_proposals = _select_index_proposals(tuple(pending_proposals), context_proposals)
     message_payload = _json_safe(message)
     recent_conversation = message_payload.pop("recent_conversation", [])
     return {
@@ -67,10 +74,16 @@ def build_operating_agent_context(
         "message": message_payload,
         "recent_conversation": recent_conversation,
         "pending_approval_requests": [_json_safe(item) for item in pending_requests],
-        "pending_proposals": [_json_safe(item) for item in pending_proposals],
+        "proposal_counts": {
+            "all": len(pending_proposals),
+            "indexed": len(index_proposals),
+            "detailed_context": len(context_proposals),
+        },
+        "proposal_index": [_proposal_index_entry(proposal) for proposal in index_proposals],
+        "pending_proposals": [_proposal_index_entry(item) for item in context_proposals],
         "pending_proposal_cards": [
             _proposal_card(proposal, request_ids=request_ids_by_proposal.get(proposal.proposal_id, ()))
-            for proposal in pending_proposals
+            for proposal in context_proposals
         ],
         "deterministic_baseline": fallback_decision.to_payload(),
         "rules": {
@@ -105,12 +118,31 @@ def build_operating_agent_context(
                 "metadata.type_policy_needed=true and metadata.type_request set to the requested label."
             ),
             "target_policy": (
-                "For feedback, choose target proposal_id/request_id from pending_proposal_cards before filling slots. "
+                "For feedback, choose exact proposal_id/request_id from proposal_index and pending_proposal_cards before filling slots. "
                 "If multiple targets are referenced, emit multiple proposal_patches. "
                 "If target confidence is below 0.65, set needs_clarification=true instead of guessing."
             ),
+            "workflow_restructure_policy": (
+                "Private-DM instructions may reorganize existing workflow state. Emit one apply_feedback patch targeting "
+                "the exact current parent with semantic_update_type=workflow_restructure. For standalone children use "
+                "relation_action=detach_children and child_proposal_ids=<comma-separated exact direct-child ids>. Add "
+                "status=done only when the user explicitly asks to complete the old parent. The current safe contract "
+                "supports leaf-child detachment; ask clarification for reparenting or nested-workflow moves. Never invent "
+                "ids; ask clarification when target or children are ambiguous."
+            ),
+            "workflow_root_policy": (
+                "For study/meeting/event lifecycles, treat review discussions, schedule decisions, and prep meetings "
+                "as steps under a stable workflow root for the actual named event when that root can be inferred. "
+                "Post-event deliverables such as follow-up materials, completion reports, result sharing, or outbound "
+                "email belong under the workflow root or nearest active workflow ancestor, not under a completed "
+                "schedule-decision child; keep the completed decision as a dependency when relevant."
+            ),
             "patch_evidence_policy": "Each proposal patch must include target_confidence, evidence_text, assumptions, and missing_slots.",
-            "semantic_update_types": "Use only completion, progress, deferral, confirmation, or correction. Use correction for explicit title/metadata/slot corrections without changing status.",
+            "semantic_update_types": (
+                "Use completion, progress, deferral, confirmation, correction, or workflow_restructure. Use correction "
+                "for explicit title/metadata/slot corrections without changing status; use workflow_restructure only "
+                "for validated changes to existing parent/child relations."
+            ),
             "external_counterpart_policy": (
                 "External work counterparts named as 담당자 are not task_management assignees. "
                 "Use assigned_to=me/teammate/shared for the internal owner, and preserve named counterparts in "
@@ -118,6 +150,162 @@ def build_operating_agent_context(
             ),
         },
     }
+
+
+_MAX_DETAILED_CONTEXT_PROPOSALS = 16
+_MAX_INDEX_PROPOSALS = 64
+_GENERIC_CONTEXT_TOKENS = frozenset(
+    {
+        "작업",
+        "업무",
+        "일정",
+        "완료",
+        "처리",
+        "하위",
+        "상위",
+        "별개",
+        "독립",
+        "분리",
+        "변경",
+        "수정",
+        "해줘",
+        "해주세요",
+    }
+)
+
+
+def _select_context_proposals(
+    message: IncomingMessage,
+    proposals: tuple[Proposal, ...],
+    *,
+    pending_requests: tuple[ApprovalRequest, ...],
+) -> tuple[Proposal, ...]:
+    """Keep semantic context broad in coverage but bounded in detail.
+
+    The compact ``proposal_index`` still exposes every exact id/title/relation.
+    Full raw proposal objects and cards are limited to pending requests, strong
+    lexical candidates, their parent/children/siblings, and recent active work.
+    This avoids sending the same large metadata corpus twice to a CLI agent.
+    """
+
+    if len(proposals) <= _MAX_DETAILED_CONTEXT_PROPOSALS:
+        return proposals
+
+    by_id = {proposal.proposal_id: proposal for proposal in proposals}
+    children_by_parent: dict[str, list[Proposal]] = {}
+    for proposal in proposals:
+        parent_id = proposal.metadata.get("parent_proposal_id", "").strip()
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append(proposal)
+
+    selected_ids = {
+        request.proposal_id
+        for request in pending_requests
+        if request.status == "pending" and request.proposal_id in by_id
+    }
+    message_tokens = _context_tokens(message.text)
+    scored: list[tuple[int, datetime, str, Proposal]] = []
+    compact_message = re.sub(r"\s+", "", message.text).lower()
+    for proposal in proposals:
+        title_tokens = _context_tokens(proposal.title)
+        relation_text = " ".join(
+            (
+                proposal.metadata.get("workflow_title", ""),
+                proposal.metadata.get("parent_title", ""),
+                proposal.metadata.get("materials", ""),
+            )
+        )
+        context_tokens = title_tokens | _context_tokens(proposal.raw_text) | _context_tokens(relation_text)
+        shared_title = message_tokens & title_tokens
+        shared_context = message_tokens & context_tokens
+        compact_title = re.sub(r"\s+", "", proposal.title).lower()
+        score = 12 * len(shared_title) + 4 * len(shared_context - shared_title)
+        if compact_title and compact_title in compact_message:
+            score += 60
+        if score:
+            scored.append((score, proposal.updated_at, proposal.proposal_id, proposal))
+    scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    selected_ids.update(item[3].proposal_id for item in scored[:24])
+    focus_ids = set(selected_ids)
+
+    relation_seed_ids = tuple(selected_ids)
+    for proposal_id in relation_seed_ids:
+        proposal = by_id.get(proposal_id)
+        if proposal is None:
+            continue
+        parent_id = proposal.metadata.get("parent_proposal_id", "").strip()
+        if parent_id in by_id:
+            selected_ids.add(parent_id)
+            selected_ids.update(child.proposal_id for child in children_by_parent.get(parent_id, ()))
+        selected_ids.update(child.proposal_id for child in children_by_parent.get(proposal_id, ()))
+
+    prioritized = sorted(
+        (by_id[proposal_id] for proposal_id in selected_ids if proposal_id in by_id),
+        key=lambda proposal: (
+            proposal.proposal_id not in focus_ids,
+            proposal.status in {"done", "rejected"},
+            -proposal.updated_at.timestamp(),
+            proposal.proposal_id,
+        ),
+    )
+    if len(prioritized) < _MAX_DETAILED_CONTEXT_PROPOSALS:
+        recent_active = sorted(
+            (
+                proposal
+                for proposal in proposals
+                if proposal.proposal_id not in selected_ids and proposal.status not in {"done", "rejected"}
+            ),
+            key=lambda proposal: (proposal.updated_at, proposal.proposal_id),
+            reverse=True,
+        )
+        prioritized.extend(recent_active[: _MAX_DETAILED_CONTEXT_PROPOSALS - len(prioritized)])
+    return tuple(prioritized[:_MAX_DETAILED_CONTEXT_PROPOSALS])
+
+
+def _proposal_index_entry(proposal: Proposal) -> dict[str, str]:
+    return {
+        "proposal_id": proposal.proposal_id,
+        "title": proposal.title,
+        "kind": proposal.kind,
+        "status": proposal.status,
+        "parent_proposal_id": proposal.metadata.get("parent_proposal_id", ""),
+        "workflow_title": proposal.metadata.get("workflow_title", ""),
+        "due_date": proposal.due_date.isoformat() if proposal.due_date else "",
+        "scheduled_date": proposal.scheduled_date.isoformat() if proposal.scheduled_date else "",
+        "time_window": proposal.time_window,
+    }
+
+
+def _select_index_proposals(
+    proposals: tuple[Proposal, ...],
+    detailed: tuple[Proposal, ...],
+) -> tuple[Proposal, ...]:
+    if len(proposals) <= _MAX_INDEX_PROPOSALS:
+        return proposals
+    selected = list(detailed)
+    selected_ids = {proposal.proposal_id for proposal in selected}
+    remaining = sorted(
+        (proposal for proposal in proposals if proposal.proposal_id not in selected_ids),
+        key=lambda proposal: (
+            proposal.status in {"done", "rejected"},
+            -proposal.updated_at.timestamp(),
+            proposal.proposal_id,
+        ),
+    )
+    selected.extend(remaining[: _MAX_INDEX_PROPOSALS - len(selected)])
+    return tuple(selected)
+
+
+def _context_tokens(text: str) -> set[str]:
+    tokens = {
+        token
+        for token in re.split(r"[^0-9A-Za-z가-힣/]+", text.lower())
+        if len(token) >= 2 and token not in _GENERIC_CONTEXT_TOKENS
+    }
+    expanded = set(tokens)
+    for token in tokens:
+        expanded.update(part for part in token.split("/") if len(part) >= 2)
+    return expanded
 
 
 def recent_conversation_from_events(

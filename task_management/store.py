@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import date, datetime
 import json
+import os
 from pathlib import Path
 import sqlite3
 from typing import Any, Iterable
@@ -53,35 +54,50 @@ class TeamTaskStore:
 
     def save_proposal(self, proposal: Proposal) -> None:
         with self._connect() as conn:
-            conn.execute(
-                """
-                insert into proposals(
-                    proposal_id, source_message_id, proposer_id, title, raw_text, kind, status,
-                    assigned_to, task_management_area, discussion_id, message_id, required_approvers,
-                    approvals, missing_slots, due_date, scheduled_date, time_window, source_url,
-                    source_export_path, created_at, updated_at, metadata
+            _upsert_proposal(conn, proposal)
+
+    def save_proposals_atomic(self, proposals: Iterable[Proposal]) -> None:
+        """Persist a related proposal mutation in one SQLite transaction."""
+
+        proposal_batch = tuple(proposals)
+        if not proposal_batch:
+            return
+        with self._connect() as conn:
+            for proposal in proposal_batch:
+                _upsert_proposal(conn, proposal)
+
+    def save_proposals_with_audit_atomic(
+        self,
+        proposals: Iterable[Proposal],
+        events: Iterable[tuple[str, dict[str, Any], datetime]],
+    ) -> None:
+        """Persist proposal mutations and their recoverable audit outbox together."""
+
+        proposal_batch = tuple(proposals)
+        event_batch = tuple(events)
+        if not proposal_batch and not event_batch:
+            return
+        with self._connect() as conn:
+            for proposal in proposal_batch:
+                _upsert_proposal(conn, proposal)
+            for event_type, payload, occurred_at in event_batch:
+                conn.execute(
+                    """
+                    insert into audit_event_outbox(event_type, occurred_at, payload_json, delivered_at)
+                    values (?, ?, ?, null)
+                    """,
+                    (
+                        event_type,
+                        _dt(occurred_at),
+                        json.dumps(_json_safe(payload), ensure_ascii=False, sort_keys=True),
+                    ),
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(proposal_id) do update set
-                    title = excluded.title,
-                    raw_text = excluded.raw_text,
-                    kind = excluded.kind,
-                    status = excluded.status,
-                    assigned_to = excluded.assigned_to,
-                    task_management_area = excluded.task_management_area,
-                    required_approvers = excluded.required_approvers,
-                    approvals = excluded.approvals,
-                    missing_slots = excluded.missing_slots,
-                    due_date = excluded.due_date,
-                    scheduled_date = excluded.scheduled_date,
-                    time_window = excluded.time_window,
-                    source_url = excluded.source_url,
-                    source_export_path = excluded.source_export_path,
-                    updated_at = excluded.updated_at,
-                    metadata = excluded.metadata
-                """,
-                _proposal_row(proposal),
-            )
+        try:
+            self.flush_audit_outbox()
+        except (OSError, sqlite3.Error, json.JSONDecodeError):
+            # Proposal state and its audit rows are already durable together.
+            # JSONL is a projection; a later append/read/maintenance cycle retries it.
+            pass
 
     def get_proposal(self, proposal_id: str) -> Proposal | None:
         with self._connect() as conn:
@@ -439,6 +455,7 @@ class TeamTaskStore:
         return cursor.rowcount > 0
 
     def append_event(self, event_type: str, payload: dict[str, Any], *, occurred_at: datetime) -> None:
+        self.flush_audit_outbox()
         event = {
             "type": event_type,
             "occurred_at": _dt(occurred_at),
@@ -447,7 +464,60 @@ class TeamTaskStore:
         with self.event_log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
+    def flush_audit_outbox(self) -> int:
+        """Append pending transactional audit rows to JSONL and mark them delivered."""
+
+        with self._connect() as conn:
+            conn.execute("begin immediate")
+            rows = conn.execute(
+                """
+                select id, event_type, occurred_at, payload_json
+                from audit_event_outbox
+                where delivered_at is null
+                order by id
+                """
+            ).fetchall()
+            if not rows:
+                return 0
+            delivered_ids = self._event_log_outbox_ids()
+            with self.event_log_path.open("a", encoding="utf-8") as handle:
+                for row in rows:
+                    if row["id"] in delivered_ids:
+                        continue
+                    event = {
+                        "type": row["event_type"],
+                        "occurred_at": row["occurred_at"],
+                        "payload": json.loads(row["payload_json"]),
+                        "outbox_id": row["id"],
+                    }
+                    handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            delivered_at = _dt(datetime.now())
+            conn.executemany(
+                "update audit_event_outbox set delivered_at = ? where id = ? and delivered_at is null",
+                ((delivered_at, row["id"]) for row in rows),
+            )
+            return len(rows)
+
+    def _event_log_outbox_ids(self) -> set[int]:
+        if not self.event_log_path.is_file():
+            return set()
+        delivered_ids: set[int] = set()
+        for line in self.event_log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            outbox_id = event.get("outbox_id")
+            if isinstance(outbox_id, int):
+                delivered_ids.add(outbox_id)
+        return delivered_ids
+
     def read_events(self) -> tuple[dict[str, Any], ...]:
+        self.flush_audit_outbox()
         if not self.event_log_path.exists():
             return ()
         events = []
@@ -465,6 +535,7 @@ class TeamTaskStore:
         replay use :meth:`read_events`.
         """
 
+        self.flush_audit_outbox()
         if not self.event_log_path.exists():
             return ()
         file_size = self.event_log_path.stat().st_size
@@ -594,9 +665,49 @@ class TeamTaskStore:
                     created_at text not null,
                     updated_at text not null
                 );
+
+                create table if not exists audit_event_outbox (
+                    id integer primary key autoincrement,
+                    event_type text not null,
+                    occurred_at text not null,
+                    payload_json text not null,
+                    delivered_at text
+                );
                 """
             )
             _migrate_legacy_schema(conn)
+
+
+def _upsert_proposal(conn: sqlite3.Connection, proposal: Proposal) -> None:
+    conn.execute(
+        """
+        insert into proposals(
+            proposal_id, source_message_id, proposer_id, title, raw_text, kind, status,
+            assigned_to, task_management_area, discussion_id, message_id, required_approvers,
+            approvals, missing_slots, due_date, scheduled_date, time_window, source_url,
+            source_export_path, created_at, updated_at, metadata
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(proposal_id) do update set
+            title = excluded.title,
+            raw_text = excluded.raw_text,
+            kind = excluded.kind,
+            status = excluded.status,
+            assigned_to = excluded.assigned_to,
+            task_management_area = excluded.task_management_area,
+            required_approvers = excluded.required_approvers,
+            approvals = excluded.approvals,
+            missing_slots = excluded.missing_slots,
+            due_date = excluded.due_date,
+            scheduled_date = excluded.scheduled_date,
+            time_window = excluded.time_window,
+            source_url = excluded.source_url,
+            source_export_path = excluded.source_export_path,
+            updated_at = excluded.updated_at,
+            metadata = excluded.metadata
+        """,
+        _proposal_row(proposal),
+    )
 
 
 def _proposal_row(proposal: Proposal) -> tuple[Any, ...]:

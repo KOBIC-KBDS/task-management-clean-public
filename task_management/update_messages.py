@@ -285,6 +285,7 @@ def _agent_clarification_message(
 
 
 def _patch_rejection_message(patch: ProposalPatch, *, actor_id: str, reason: str) -> OutboundMessage:
+    message_type = "agent_patch_rejected"
     if reason == "low_target_confidence":
         text = (
             "어느 작업에 반영할지 확신이 낮아 자동으로 바꾸지 않았습니다.\n"
@@ -298,6 +299,13 @@ def _patch_rejection_message(patch: ProposalPatch, *, actor_id: str, reason: str
             f"확인이 필요한 항목: *{slots}*\n"
             f"제가 이해한 근거: {patch.evidence_text or patch.body}"
         )
+    elif reason == "invalid_workflow_relation_action":
+        message_type = "agent_patch_clarification_needed"
+        text = (
+            "요청하신 작업 구조 변경은 바로 적용하지 않았습니다.\n"
+            "현재는 선택한 직접 하위 작업을 기존 상위 작업에서 분리해 독립 작업으로 만드는 것만 지원합니다.\n"
+            "선택한 하위 작업들을 독립 작업으로 분리하려는 요청인지 알려주세요."
+        )
     else:
         text = (
             "이 답변을 안전하게 반영하지 않았습니다.\n"
@@ -307,7 +315,7 @@ def _patch_rejection_message(patch: ProposalPatch, *, actor_id: str, reason: str
     return OutboundMessage(
         surface="personal_chat",
         recipient_id=actor_id,
-        message_type="agent_patch_rejected",
+        message_type=message_type,
         text=text,
         proposal_id=patch.proposal_id,
         approval_request_id=patch.request_id,

@@ -35,6 +35,8 @@ Keep this file public-safe:
 - If a semantic patch looks like unrelated new work, deterministic code should reject that target and route the same message through new-work intake.
 - Plain `question` items do not require a date unless they explicitly carry `needs_exact_date=true` or another concrete date requirement.
 - Rejected and done proposals are excluded from task-core preview readiness, not marked as blocked work.
+- General private-DM instructions may detach explicit direct leaf children from an existing workflow while completing or retaining the old parent. Reparenting and nested-workflow moves remain clarification-only.
+- Multi-proposal workflow changes and their audit events must be persisted together through the transactional audit outbox. JSONL delivery is a retryable projection, not a reason to report a committed hierarchy change as failed.
 
 ## Change Log
 
@@ -43,6 +45,7 @@ Keep this file public-safe:
 | 2026-06-13 | Codex | OMC refactor sync / architecture | Ported the large OMC runtime refactor into the clean public branch: Slack delivery retries and stable ids, same-day deferred reminders, extracted approval/proposal/semantic/workflow services, provider-generic outbound delivery, channel/source reference registries, unified Korean time sorting, kind/reconciler/surface registries, prep-subtask builder, runtime guards, and updated CodeBoarding inventory. Clean-only install defaults and public-safe paths were preserved. | `clean_mirror_sync.py check-worktree --base main`: ok; `python -X utf8 -m pytest -q`: 296 passed; `git diff --check`: ok; public-safety grep for tokens/Slack ids/private IPs: no hits. |
 | 2026-06-13 | Codex | semantic routing / approvals / surfaces | Ported pending-card hijack protection: semantic rejection patches now close approvals, low-evidence meeting-like patches fall back to new-work creation, half-hour meeting parsing defaults to today for event context, public-safe source questions no longer require dates, and rejected/done items are excluded from blocked preview counts. | `python -X utf8 -m pytest -q` on clean tree via shared test venv: 258 passed. |
 | 2026-06-13 | Codex | completion / rejected surfaces | Ported the rejected-work surface boundary and unresolved-slot completion behavior: rejected proposals stay auditable but no longer render as active schedule/current-work/pending-card rows, and completion updates can close request-scoped or direct targets even when date/time slots remain unknown. | `clean_mirror_sync.py check-worktree --base main`: ok; targeted semantic/frontend/monthly tests: 26 passed; `python -X utf8 -m pytest -q`: 301 passed; `git diff --check`: ok. |
+| 2026-07-30 | Codex | general Slack input / workflow restructuring | Added bounded semantic context for broad existing-work instructions and a validated `workflow_restructure` operation that can detach explicit direct leaf children while completing or retaining the old parent. Unsafe reparenting, nested moves, unauthorized targets, and pending approval states ask for clarification or reject without mutation. Related proposal and audit rows use a recoverable transactional outbox. | Live commit `f6548d2`; clean verification recorded in the sync commit. |
 
 ## Open Questions / Watchpoints
 
@@ -50,6 +53,7 @@ Keep this file public-safe:
 - If new agent backends are added, they must return the same strict decision envelope and must be covered by fixture tests.
 - If Slack Home, briefing, or dashboard rendering changes, confirm all three surfaces keep the same hierarchy/preview semantics.
 - If task/event duplicate collapse is broadened, keep it conservative and preserve an audit trail for merged duplicates.
+- If reparenting or nested workflow moves become supported, define approval-request migration, dependency preservation, cycle prevention, and rollback semantics before expanding the deterministic operation vocabulary.
 - If service extraction continues, keep the public docs in sync: `docs/agent-flow.md` is the operator narrative, while `docs/codeboarding/` is static inventory evidence and should not contain local absolute paths.
 
 ## Useful Entry Points

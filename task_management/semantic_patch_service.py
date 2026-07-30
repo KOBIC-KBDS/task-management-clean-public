@@ -20,6 +20,8 @@ from .relations import (
     LOCATION_OPTIONAL_KEY,
     NEEDS_EXACT_TIME_KEY,
     NEEDS_PREP_KEY,
+    PARENT_PROPOSAL_ID_KEY,
+    PARENT_SOURCE_KEY,
     PARTICIPANTS_KEY,
     PARTICIPANT_LABEL_KEY,
     PROGRESS_NOTE_KEY,
@@ -27,6 +29,21 @@ from .relations import (
     PROGRESS_STATUS_KEY,
     PROGRESS_UPDATED_AT_KEY,
     REMAINING_WORK_KEY,
+    STEP_COUNT_KEY,
+    STEP_INDEX_KEY,
+    WORKFLOW_CHILD_PROPOSAL_IDS_KEY,
+    WORKFLOW_CONTAINER_KEY,
+    WORKFLOW_DETACH_CHILDREN_ACTION,
+    WORKFLOW_GROUP_CHILD_IDS_KEY,
+    WORKFLOW_GROUP_ID_KEY,
+    WORKFLOW_GROUP_REQUEST_ID_KEY,
+    WORKFLOW_ID_KEY,
+    WORKFLOW_RELATION_ACTION_KEY,
+    WORKFLOW_ROLE_KEY,
+    WORKFLOW_SEPARATE_CHILD_IDS_KEY,
+    WORKFLOW_SOURCE_KEY,
+    WORKFLOW_TITLE_KEY,
+    parent_proposal_id,
 )
 
 from dataclasses import replace
@@ -132,16 +149,24 @@ class SemanticPatchService:
                 outbound.append(_patch_rejection_message(patch, actor_id=actor_id, reason=rejection))
                 continue
 
-            self.store.append_event(
-                "agent.patch.accepted",
-                {
-                    "patch": patch.to_payload(),
-                    "target_confidence": patch.target_confidence,
-                    "evidence_text": patch.evidence_text,
-                },
-                occurred_at=changed_at,
-            )
-            if patch.request_id and _is_approval_rejection_update(patch.temporal_update):
+            is_workflow_restructure = _is_workflow_restructure_update(patch.temporal_update)
+            if not is_workflow_restructure:
+                self.store.append_event(
+                    "agent.patch.accepted",
+                    {
+                        "patch": patch.to_payload(),
+                        "target_confidence": patch.target_confidence,
+                        "evidence_text": patch.evidence_text,
+                    },
+                    occurred_at=changed_at,
+                )
+            if is_workflow_restructure:
+                result = self._handle_workflow_restructure_patch(
+                    patch,
+                    actor_id=actor_id,
+                    changed_at=changed_at,
+                )
+            elif patch.request_id and _is_approval_rejection_update(patch.temporal_update):
                 result = self._route_approval(
                     request_id=patch.request_id,
                     approver_id=actor_id,
@@ -185,6 +210,8 @@ class SemanticPatchService:
             return "agent_requested_clarification"
         if patch.target_confidence < MIN_SEMANTIC_TARGET_CONFIDENCE:
             return "low_target_confidence"
+        if patch.request_id and _is_workflow_restructure_update(patch.temporal_update):
+            return "workflow_restructure_requires_direct_patch"
         is_request_rejection = bool(patch.request_id and _is_approval_rejection_update(patch.temporal_update))
         if not is_request_rejection:
             semantic_shape_rejection = _semantic_update_shape_rejection(patch.temporal_update)
@@ -196,10 +223,16 @@ class SemanticPatchService:
             proposal = self.store.get_proposal(patch.proposal_id)
             if proposal is None:
                 return "missing_proposal"
-            if actor_id not in {proposal.proposer_id, proposal.assigned_to, *proposal.required_approvers, *proposal.approvals}:
+            if not _actor_can_patch_proposal(proposal, actor_id):
                 return "actor_not_authorized_for_direct_patch"
             if not _meaningful_semantic_update(patch.temporal_update):
                 return "empty_semantic_update"
+            if _is_workflow_restructure_update(patch.temporal_update):
+                return self._workflow_restructure_rejection_reason(
+                    patch,
+                    proposal=proposal,
+                    actor_id=actor_id,
+                )
             if _is_completion_update(patch.temporal_update):
                 if proposal.status == "rejected":
                     return "target_not_completable"
@@ -219,10 +252,65 @@ class SemanticPatchService:
         if patch.proposal_id and request.proposal_id != patch.proposal_id:
             return "proposal_request_mismatch"
         proposal = self.store.get_proposal(request.proposal_id)
+        if proposal is not None and _is_workflow_restructure_update(patch.temporal_update):
+            return self._workflow_restructure_rejection_reason(
+                patch,
+                proposal=proposal,
+                actor_id=actor_id,
+            )
         if proposal is not None and _is_completion_update(patch.temporal_update) and proposal.status == "rejected":
             return "target_not_completable"
         if proposal is not None and _looks_like_unrelated_new_work_patch(patch, proposal):
             return "target_mismatch_new_work"
+        return ""
+
+    def _workflow_restructure_rejection_reason(
+        self,
+        patch: ProposalPatch,
+        *,
+        proposal: Proposal,
+        actor_id: str,
+    ) -> str:
+        update = patch.temporal_update
+        action = update.get(WORKFLOW_RELATION_ACTION_KEY, "").strip()
+        child_ids = csv_dedupe(update.get(WORKFLOW_CHILD_PROPOSAL_IDS_KEY, ""))
+        if proposal.status not in {"approved", "applied", "done"}:
+            return "target_not_restructurable"
+        if self.store.list_approval_requests(proposal_id=proposal.proposal_id, status="pending"):
+            return "workflow_parent_has_pending_request"
+        if not child_ids:
+            return "workflow_restructure_requires_children"
+        if len(child_ids) > 50:
+            return "workflow_restructure_too_many_children"
+
+        all_proposals = self.store.list_proposals()
+        children_by_parent: dict[str, list[Proposal]] = {}
+        for item in all_proposals:
+            item_parent_id = parent_proposal_id(item)
+            if item_parent_id:
+                children_by_parent.setdefault(item_parent_id, []).append(item)
+        for child_id in child_ids:
+            child = self.store.get_proposal(child_id)
+            if child is None:
+                return "missing_workflow_child"
+            if parent_proposal_id(child) != proposal.proposal_id:
+                return "workflow_child_not_owned_by_target"
+            if child.status not in {"approved", "applied", "done"}:
+                return "workflow_child_not_restructurable"
+            if children_by_parent.get(child.proposal_id):
+                return "nested_workflow_child_not_detachable"
+            if child.metadata.get(WORKFLOW_CONTAINER_KEY) == "true":
+                return "nested_workflow_child_not_detachable"
+            if child.metadata.get(WORKFLOW_ROLE_KEY) == "parent":
+                return "nested_workflow_child_not_detachable"
+            if child.metadata.get(WORKFLOW_GROUP_CHILD_IDS_KEY, "").strip():
+                return "nested_workflow_child_not_detachable"
+            if child.metadata.get(WORKFLOW_SEPARATE_CHILD_IDS_KEY, "").strip():
+                return "nested_workflow_child_not_detachable"
+            if self.store.list_approval_requests(proposal_id=child.proposal_id, status="pending"):
+                return "workflow_child_has_pending_request"
+            if not _actor_can_patch_proposal(child, actor_id):
+                return "actor_not_authorized_for_workflow_child"
         return ""
 
     def _handle_direct_semantic_patch(
@@ -353,6 +441,161 @@ class SemanticPatchService:
             proposals=(updated,),
             outbound_messages=(
                 _semantic_direct_update_message(updated, actor_id=actor_id),
+            ),
+        )
+
+    def _handle_workflow_restructure_patch(
+        self,
+        patch: ProposalPatch,
+        *,
+        actor_id: str,
+        changed_at: datetime,
+    ) -> OrchestrationResult:
+        parent = self.store.get_proposal(patch.proposal_id)
+        if parent is None:
+            return OrchestrationResult()
+        update = patch.temporal_update
+        action = update[WORKFLOW_RELATION_ACTION_KEY]
+        child_ids = csv_dedupe(update[WORKFLOW_CHILD_PROPOSAL_IDS_KEY])
+
+        changed_children: list[Proposal] = []
+        for child_id in child_ids:
+            child = self.store.get_proposal(child_id)
+            if child is None:
+                continue
+            updated_child = replace(
+                child,
+                metadata=_restructured_child_metadata(
+                    child,
+                    source_parent=parent,
+                    actor_id=actor_id,
+                    changed_at=changed_at,
+                ),
+                updated_at=changed_at,
+            )
+            changed_children.append(updated_child)
+
+        parent_metadata = _remove_grouped_child_ids(parent.metadata, child_ids)
+        parent_metadata.update(
+            {
+                LAST_SEMANTIC_PATCH_ACTOR_ID_KEY: actor_id,
+                LAST_SEMANTIC_PATCH_AT_KEY: changed_at.isoformat(timespec="seconds"),
+                LAST_SEMANTIC_PATCH_CONFIDENCE_KEY: f"{patch.target_confidence:.2f}",
+                LAST_SEMANTIC_PATCH_EVIDENCE_KEY: patch.evidence_text,
+                LAST_STATE_LINKED_UPDATE_TYPE_KEY: "semantic_workflow_restructure",
+            }
+        )
+        parent_status = parent.status
+        parent_completed_now = False
+        if update.get("status") == "done":
+            parent_status = "done"
+            parent_completed_now = parent.status != "done"
+            if parent_completed_now:
+                parent_metadata.update(
+                    {
+                        "completed_by": actor_id,
+                        COMPLETED_AT_KEY: changed_at.isoformat(timespec="seconds"),
+                        "completion_source": "semantic_workflow_restructure",
+                    }
+                )
+        updated_parent = replace(
+            parent,
+            status=parent_status,
+            missing_slots=() if parent_status == "done" else parent.missing_slots,
+            metadata=parent_metadata,
+            updated_at=changed_at,
+        )
+        audit_events: list[tuple[str, dict[str, object], datetime]] = [
+            (
+                "agent.patch.accepted",
+                {
+                    "patch": patch.to_payload(),
+                    "target_confidence": patch.target_confidence,
+                    "evidence_text": patch.evidence_text,
+                },
+                changed_at,
+            )
+        ]
+        if parent_completed_now:
+            audit_events.append(
+                (
+                    "proposal.completed",
+                    {"proposal": updated_parent, "actor_id": actor_id, "semantic_patch": patch.to_payload()},
+                    changed_at,
+                )
+            )
+        else:
+            audit_events.append(
+                (
+                    "proposal.changed",
+                    {
+                        "proposal": updated_parent,
+                        "change_body": patch.body,
+                        "actor_id": actor_id,
+                        "semantic_patch": patch.to_payload(),
+                        "change_type": "semantic_workflow_restructure",
+                    },
+                    changed_at,
+                )
+            )
+        for changed_child in changed_children:
+            audit_events.append(
+                (
+                    "proposal.changed",
+                    {
+                        "proposal": changed_child,
+                        "change_body": patch.body,
+                        "actor_id": actor_id,
+                        "semantic_patch": patch.to_payload(),
+                        "change_type": "semantic_workflow_restructure",
+                    },
+                    changed_at,
+                )
+            )
+
+        audit_events.append(
+            (
+                "workflow.restructured",
+                {
+                    "parent_proposal_id": updated_parent.proposal_id,
+                    "child_proposal_ids": list(child_ids),
+                    "relation_action": action,
+                    "parent_completed": parent_status == "done",
+                    "actor_id": actor_id,
+                    "semantic_patch": patch.to_payload(),
+                },
+                changed_at,
+            )
+        )
+        self.store.save_proposals_with_audit_atomic(
+            (updated_parent, *changed_children),
+            audit_events,
+        )
+        action_text = f"하위 작업 {len(changed_children)}개를 독립 작업으로 분리했습니다."
+        completion_text = (
+            " 상위 작업은 완료 처리했습니다."
+            if parent_completed_now
+            else " 상위 작업은 완료 상태로 유지했습니다."
+            if parent_status == "done"
+            else ""
+        )
+        return OrchestrationResult(
+            proposals=(updated_parent, *changed_children),
+            outbound_messages=(
+                OutboundMessage(
+                    surface="personal_chat",
+                    recipient_id=actor_id,
+                    message_type="workflow_restructured",
+                    text=f"작업 구조를 반영했습니다: {updated_parent.title}.{completion_text} {action_text}".strip(),
+                    proposal_id=updated_parent.proposal_id,
+                    card={
+                        "proposal_id": updated_parent.proposal_id,
+                        "title": updated_parent.title,
+                        "status": updated_parent.status,
+                        "relation_action": action,
+                        "child_proposal_ids": ",".join(child_ids),
+                    },
+                ),
             ),
         )
 
@@ -647,6 +890,8 @@ def _meaningful_semantic_update(update: dict[str, str]) -> bool:
             "title",
             "corrected_title",
             "semantic_update_type",
+            WORKFLOW_RELATION_ACTION_KEY,
+            WORKFLOW_CHILD_PROPOSAL_IDS_KEY,
         )
     )
 
@@ -708,6 +953,10 @@ def _is_completion_update(update: dict[str, str]) -> bool:
     return update.get("status") == "done" or update.get("semantic_update_type") == "completion"
 
 
+def _is_workflow_restructure_update(update: dict[str, str]) -> bool:
+    return update.get("semantic_update_type") == "workflow_restructure"
+
+
 def _requires_actionable_direct_patch(update: dict[str, str]) -> bool:
     if _is_scoped_progress_completion(update):
         return False
@@ -728,8 +977,24 @@ def _semantic_update_shape_rejection(update: dict[str, str]) -> str:
     update_type = update.get("semantic_update_type", "")
     if not update_type:
         return ""
-    if update_type not in {"completion", "progress", "deferral", "confirmation", "correction"}:
+    if update_type not in {
+        "completion",
+        "progress",
+        "deferral",
+        "confirmation",
+        "correction",
+        "workflow_restructure",
+    }:
         return "invalid_semantic_update_type"
+    if update_type == "workflow_restructure":
+        action = update.get(WORKFLOW_RELATION_ACTION_KEY, "")
+        if action != WORKFLOW_DETACH_CHILDREN_ACTION:
+            return "invalid_workflow_relation_action"
+        if status not in {"", "done"}:
+            return "workflow_restructure_unsupported_status"
+        if not csv_dedupe(update.get(WORKFLOW_CHILD_PROPOSAL_IDS_KEY, "")):
+            return "workflow_restructure_requires_children"
+        return ""
     if update_type == "correction" and status:
         return "correction_must_not_set_status"
     if update_type == "correction" and not _has_correction_slot_update(update):
@@ -747,6 +1012,70 @@ def _semantic_update_shape_rejection(update: dict[str, str]) -> str:
     ):
         return "confirmation_requires_confirmed_status_or_slot"
     return ""
+
+
+_CHILD_RELATION_KEYS = frozenset(
+    {
+        PARENT_PROPOSAL_ID_KEY,
+        PARENT_SOURCE_KEY,
+        STEP_INDEX_KEY,
+        STEP_COUNT_KEY,
+        WORKFLOW_ID_KEY,
+        WORKFLOW_TITLE_KEY,
+        WORKFLOW_ROLE_KEY,
+        WORKFLOW_CONTAINER_KEY,
+        WORKFLOW_GROUP_ID_KEY,
+        WORKFLOW_GROUP_REQUEST_ID_KEY,
+        WORKFLOW_SOURCE_KEY,
+        "parent_title",
+        "context_inherited_from",
+    }
+)
+
+
+def _actor_can_patch_proposal(proposal: Proposal, actor_id: str) -> bool:
+    return actor_id in {
+        proposal.proposer_id,
+        proposal.assigned_to,
+    }
+
+
+def _restructured_child_metadata(
+    child: Proposal,
+    *,
+    source_parent: Proposal,
+    actor_id: str,
+    changed_at: datetime,
+) -> dict[str, str]:
+    metadata = {key: value for key, value in child.metadata.items() if key not in _CHILD_RELATION_KEYS}
+    metadata["relation_change_source"] = "semantic_patch"
+    metadata["relation_changed_by"] = actor_id
+    metadata["previous_parent_proposal_id"] = source_parent.proposal_id
+    metadata["relation_changed_at"] = changed_at.isoformat(timespec="seconds")
+    if child.status != "done" and metadata.get("completion_scope") in _SCOPED_COMPLETION_SCOPES:
+        for key in (
+            "completion_scope",
+            PROGRESS_STATUS_KEY,
+            PROGRESS_NOTE_KEY,
+            PROGRESS_PERCENT_KEY,
+            PROGRESS_UPDATED_AT_KEY,
+            "progress_updated_by",
+        ):
+            metadata.pop(key, None)
+    metadata["detached_from_proposal_id"] = source_parent.proposal_id
+    return metadata
+
+
+def _remove_grouped_child_ids(metadata: dict[str, str], removed_child_ids: tuple[str, ...]) -> dict[str, str]:
+    updated = dict(metadata)
+    removed = set(removed_child_ids)
+    for key in (WORKFLOW_GROUP_CHILD_IDS_KEY, WORKFLOW_SEPARATE_CHILD_IDS_KEY):
+        remaining = [item for item in csv_dedupe(updated.get(key, "")) if item not in removed]
+        if remaining:
+            updated[key] = ",".join(remaining)
+        else:
+            updated.pop(key, None)
+    return updated
 
 
 def _looks_like_unrelated_new_work_patch(patch: ProposalPatch, proposal: Proposal) -> bool:

@@ -11,6 +11,10 @@ from .relations import (
     PROGRESS_PERCENT_KEY,
     PROGRESS_STATUS_KEY,
     REMAINING_WORK_KEY,
+    WORKFLOW_CHILD_PROPOSAL_IDS_KEY,
+    WORKFLOW_DETACH_CHILDREN_ACTION,
+    WORKFLOW_RELATION_ACTION_KEY,
+    parent_proposal_id,
 )
 
 from dataclasses import dataclass, field
@@ -362,6 +366,9 @@ class RuleBasedTeamTaskOperatingAgent:
         feedback = self._feedback_decision(message, pending_approval_requests, pending_proposals)
         if feedback is not None:
             return feedback
+        workflow_restructure = self._workflow_restructure_decision(message, pending_proposals)
+        if workflow_restructure is not None:
+            return workflow_restructure
         natural_feedback = self._natural_feedback_decision(message, pending_proposals)
         if natural_feedback is not None:
             return natural_feedback
@@ -417,6 +424,98 @@ class RuleBasedTeamTaskOperatingAgent:
                     target_confidence=1.0,
                     evidence_text=message.text,
                     missing_slots=tuple(proposal.missing_slots),
+                ),
+            ),
+        )
+
+    def _workflow_restructure_decision(
+        self,
+        message: IncomingMessage,
+        pending_proposals: Sequence[Proposal],
+    ) -> OperatingAgentDecision | None:
+        """Conservative timeout fallback for explicit existing-workflow detachment.
+
+        This guardrail never infers hidden ids. It requires a private DM, an
+        explicit structure-change signal, one exact parent-title mention, and
+        one or more exact direct-child title mentions. The semantic CLI remains
+        the primary interpreter for looser or more complex requests.
+        """
+
+        if message.visibility != "private":
+            return None
+        if _has_workflow_reparent_signal(message.text):
+            return OperatingAgentDecision(
+                action="no_action",
+                source="rule_based",
+                confidence=0.9,
+                rationale="Reparenting needs explicit approval-migration semantics before deterministic application.",
+                clarification_questions=(
+                    ClarificationQuestion(
+                        recipient_id=message.sender_id,
+                        prompt=(
+                            "하위 작업을 다른 상위 작업으로 옮기는 요청으로 이해했습니다. "
+                            "현재 자동으로 안전하게 처리할 수 있는 것은 기존 상위에서 분리해 "
+                            "독립 작업으로 만드는 것뿐입니다. 우선 독립 작업으로 분리할까요?"
+                        ),
+                        missing_slots=("relation_action",),
+                    ),
+                ),
+            )
+        if not _has_workflow_detach_signal(message.text):
+            return None
+        normalized = _compact_text(message.text)
+        proposals = tuple(pending_proposals)
+        direct_children_by_parent: dict[str, list[Proposal]] = {}
+        for proposal in proposals:
+            parent_id = parent_proposal_id(proposal)
+            if parent_id:
+                direct_children_by_parent.setdefault(parent_id, []).append(proposal)
+        parent_candidates = [
+            proposal
+            for proposal in proposals
+            if proposal.proposal_id in direct_children_by_parent
+            and _compact_text(proposal.title)
+            and _compact_text(proposal.title) in normalized
+        ]
+        if not parent_candidates:
+            return None
+        parent_candidates.sort(key=lambda proposal: len(_compact_text(proposal.title)), reverse=True)
+        if (
+            len(parent_candidates) > 1
+            and len(_compact_text(parent_candidates[0].title)) == len(_compact_text(parent_candidates[1].title))
+        ):
+            return None
+        parent = parent_candidates[0]
+        children = tuple(
+            child
+            for child in direct_children_by_parent[parent.proposal_id]
+            if _compact_text(child.title) and _compact_text(child.title) in normalized
+        )
+        if not children:
+            return None
+        temporal_update = {
+            "semantic_update_type": "workflow_restructure",
+            WORKFLOW_RELATION_ACTION_KEY: WORKFLOW_DETACH_CHILDREN_ACTION,
+            WORKFLOW_CHILD_PROPOSAL_IDS_KEY: ",".join(child.proposal_id for child in children),
+        }
+        if _has_completion_signal(message.text):
+            temporal_update["status"] = "done"
+        evidence_titles = ", ".join((parent.title, *(child.title for child in children)))
+        return OperatingAgentDecision(
+            action="apply_feedback",
+            source="rule_based",
+            confidence=0.95,
+            rationale="Explicit parent and direct-child titles support a conservative workflow detach patch.",
+            proposal_patches=(
+                ProposalPatch(
+                    request_id="",
+                    proposal_id=parent.proposal_id,
+                    actor_id=message.sender_id,
+                    body=message.text,
+                    temporal_update=temporal_update,
+                    reason="explicit_existing_workflow_detach",
+                    target_confidence=0.95,
+                    evidence_text=evidence_titles,
                 ),
             ),
         )
@@ -639,6 +738,42 @@ def _remaining_work_from_progress_text(text: str) -> str:
 def _has_deferral_signal(text: str) -> bool:
     compact = text.replace(" ", "").lower()
     return any(token in compact for token in ("미뤄", "연기", "나중에", "다시잡", "리마인드", "다시물어"))
+
+
+def _has_workflow_detach_signal(text: str) -> bool:
+    compact = _compact_text(text)
+    return any(
+        token in compact
+        for token in (
+            "독립",
+            "분리",
+            "하위작업에서빼",
+            "하위항목에서빼",
+            "상위작업에서빼",
+            "별개작업으로",
+        )
+    )
+
+
+def _has_workflow_reparent_signal(text: str) -> bool:
+    compact = _compact_text(text)
+    return any(
+        token in compact
+        for token in (
+            "다른상위아래로옮",
+            "다른상위작업으로옮",
+            "다른상위작업아래로옮",
+            "다른상위로옮",
+            "상위작업변경",
+            "상위항목변경",
+            "부모작업변경",
+            "재부모",
+        )
+    )
+
+
+def _compact_text(text: str) -> str:
+    return re.sub(r"[^0-9a-z가-힣/]+", "", text.lower())
 
 
 def _looks_like_missing_info_deferral(text: str) -> bool:

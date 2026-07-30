@@ -38,6 +38,7 @@ The older flow treated the semantic decision as mostly create/update followed by
 11. **Provider-generic outbound path.** Renderers create `OutboundMessage` objects; `outbound_delivery.py` handles queue/send/dedupe flow behind a provider transport so Slack remains a thin wrapper rather than the architecture center.
 12. **Runtime resilience.** Socket reconnect backoff, fast-cycle guards, deferred reminder ticking, and transient Slack send retries keep clean deployments closer to the live operating shape without committing live state.
 13. **Shared engineering memory.** Refactoring handoffs should update `docs/shared-context.md` with public-safe decisions, verification, and watchpoints so Codex, Claude Code, and human maintainers share the same current context.
+14. **General existing-work restructuring.** A private natural-language request can complete or retain an umbrella item while detaching explicitly named direct leaf children as standalone work. Exact IDs, current ownership, lifecycle state, pending approvals, nesting, and audit persistence remain deterministic safety gates.
 
 ## Runtime intervention points
 
@@ -46,9 +47,9 @@ The older flow treated the semantic decision as mostly create/update followed by
 | Intake | `task_management/cli.py`, `task_management/slack_socket.py`, `task_management/slack_adapter.py`, `task_management/channels.py`, `task_management/source_refs.py` | Deterministic adapter | Socket Mode, polling, fixture, and CLI commands become `IncomingMessage` objects. Channel-specific id and source-reference semantics are centralized before persistence or dedupe. |
 | Context assembly | `task_management/orchestrator.py`, `task_management/proposal_intake.py`, `task_management/semantic_context.py`, `task_management/store.py` | Deterministic code | The orchestrator remains a coordinator while proposal intake and context assembly load active proposals, pending approvals, relations, recent audit evidence, and current workflow context. |
 | Semantic decision | `task_management/codex_operating_agent.py`, `task_management/claude_code_operating_agent.py`, `task_management/openai_operating_agent.py`, `task_management/operating_agent_prompt.py` | Codex / Claude / OpenAI semantic agent | The agent classifies no-action vs create vs update vs clarification, chooses semantic target candidates, and returns a strict JSON envelope. It is explicitly instructed to prefer stable workflow roots for event lifecycles. |
-| Envelope and policy gate | `task_management/semantic_patch_service.py`, `task_management/approval_flow.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py`, `task_management/feedback_scoring.py` | Deterministic code | Invalid decisions are refused; target evidence, missing slots, approval requirements, risky auto-approval, and conflicts are handled before state changes. Explicit semantic rejection patches close approvals; low-evidence unrelated patches are rerouted as new work. |
+| Envelope and policy gate | `task_management/semantic_patch_service.py`, `task_management/approval_flow.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py`, `task_management/feedback_scoring.py` | Deterministic code | Invalid decisions are refused; target evidence, missing slots, approval requirements, risky auto-approval, conflicts, and existing-workflow mutations are handled before state changes. Explicit semantic rejection patches close approvals; low-evidence unrelated patches are rerouted as new work. |
 | Workflow graph normalization | `task_management/workflow_normalizer.py`, `task_management/workflow_batch.py`, `task_management/relations.py`, `task_management/completion_linker.py`, `task_management/prep_subtasks.py` | Deterministic code, seeded by semantic evidence | New drafts and selected existing graphs are normalized around canonical workflow roots, parent/child relations, dependency edges, linked completion evidence, prep subtasks, and task/event duplicate commitments. |
-| State and history | `task_management/store.py`, `task_management/timeline.py`, `task_management/backfill_report.py` | Deterministic code | Proposals, approval requests, parent/child metadata, dependencies, timeline entries, outbound deliveries, and audit JSONL events are stored locally. |
+| State and history | `task_management/store.py`, `task_management/timeline.py`, `task_management/backfill_report.py` | Deterministic code | Proposals, approval requests, parent/child metadata, dependencies, timeline entries, outbound deliveries, and audit JSONL events are stored locally. Multi-proposal hierarchy changes and their audit rows share a transactional outbox. |
 | Human surfaces | `task_management/slack_home.py`, `task_management/secretary.py`, `task_management/frontend.py`, `task_management/human_view.py`, `task_management/hierarchy_view.py`, `task_management/work_item_state.py`, `task_management/sort_keys.py`, `task_management/korean_time.py` | Deterministic renderer | Slack replies, Slack Home, morning/afternoon/EOD briefings, and dashboard pages render hierarchy-aware work items with overdue sorting, shared Korean time parsing, and compact completed-child display. |
 | Outbound delivery | `task_management/outbound_delivery.py`, `task_management/slack_adapter.py`, `task_management/chat_adapter.py` | Deterministic provider wrapper | Queue, send, retry, failure audit, provider message id capture, and dedupe are handled through a transport seam; Slack remains one provider implementation. |
 | External preview | `task_management/task_core_bridge.py` | Deterministic bridge | The repo builds and validates preview-only `task-core.export.v1` payloads. It does not write task-core inbox/raw/wiki state. |
@@ -265,6 +266,28 @@ When refactoring this contract, update `docs/shared-context.md` with:
 - why deterministic safety still holds,
 - which tests prove it,
 - and any watchpoints for the next Codex or Claude Code session.
+
+## General existing-work requests
+
+Private Slack DMs may express state changes that are broader than a date or status update. The semantic agent should treat requests such as “complete this umbrella item but keep these unfinished children as standalone tasks” as feedback against existing proposals.
+
+```mermaid
+flowchart TD
+  A[General workflow instruction] --> B[Agent resolves exact parent and child ids]
+  B --> C[workflow_restructure patch]
+  C --> D{Core validates every referenced relation}
+  D -->|Invalid id, ownership, or cycle| E[Reject whole mutation]
+  D -->|Valid| F[Complete or retain parent state]
+  F --> G[Detach selected direct leaf children]
+  G --> H[Write proposal.changed and workflow.restructured audit events]
+```
+
+The supported deterministic operations are:
+
+- `relation_action=detach_children`: remove selected direct children from the old workflow and keep their task state intact.
+- Optional `status=done`: complete the old parent in the same validated operation.
+
+This is deliberately more permissive at the language layer but not at the storage layer. The agent can understand varied natural-language instructions, while the core still requires exact existing IDs, current ownership, actionable lifecycle state, direct leaf-child ownership, and all-or-nothing proposal persistence. Reparenting and nested-workflow moves remain clarification-only until their approval migration semantics are explicit.
 
 ## Backend choices
 

@@ -1,7 +1,7 @@
 # Data Flow: task-management-public-release
 
 - Target repo: `<repo-root>`
-- Generated at: `2026-06-13T12:02:13Z`
+- Generated at: `2026-07-30T05:12:49Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Inventory Data Flow
@@ -20,6 +20,7 @@ flowchart LR
 | Item | Value |
 | --- | --- |
 | .git/ | skipped |
+| .omx/ | skipped |
 | .pytest_cache/ | skipped |
 | .env.example | skipped |
 | .state-md/task_management.sqlite3 | skipped |

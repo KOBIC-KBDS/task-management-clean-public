@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from task_management.domain import IncomingMessage
+from task_management.domain import IncomingMessage, Proposal
 from task_management.operating_agent import (
     OPERATING_AGENT_SCHEMA,
     OPERATING_DECISION_OUTPUT_SCHEMA,
@@ -124,3 +125,75 @@ def test_operating_agent_feedback_patch_is_applied_by_core_policy(tmp_path: Path
     assert patch["temporal_update"]["scheduled_date"] == "2026-05-09"
     assert resolved.proposals[0].status == "approved"
     assert resolved.proposals[0].scheduled_date.isoformat() == "2026-05-09"
+
+
+def test_rule_fallback_emits_safe_workflow_detach_for_explicit_parent_and_children() -> None:
+    parent = Proposal(
+        proposal_id="proposal/wrapup",
+        source_message_id="source/wrapup",
+        proposer_id="me",
+        title="월말 업무 마무리",
+        raw_text="월말 업무 마무리",
+        kind="task",
+        status="done",
+        assigned_to="me",
+        task_management_area="work",
+        discussion_id="private/me",
+        message_id="wrapup/1",
+        required_approvers=("me",),
+        approvals=("me",),
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={"workflow_role": "parent"},
+    )
+    kso = replace(
+        parent,
+        proposal_id="proposal/kso",
+        source_message_id="source/kso",
+        title="서비스 구조 확인",
+        raw_text="서비스 구조 확인",
+        message_id="kso/1",
+        status="approved",
+        metadata={"parent_proposal_id": parent.proposal_id},
+    )
+    gena = replace(
+        kso,
+        proposal_id="proposal/gena",
+        source_message_id="source/gena",
+        title="검토 양식 고도화",
+        raw_text="검토 양식 고도화",
+        message_id="gena/1",
+    )
+
+    decision = RuleBasedTeamTaskOperatingAgent().decide(
+        _message("월말 업무 마무리는 완료로 두고 서비스 구조 확인과 검토 양식 고도화는 독립 작업으로 분리해줘"),
+        pending_approval_requests=(),
+        pending_proposals=(parent, kso, gena),
+    )
+
+    assert decision.action == "apply_feedback"
+    patch = decision.proposal_patches[0]
+    assert patch.proposal_id == parent.proposal_id
+    assert patch.target_confidence == 0.95
+    assert patch.temporal_update == {
+        "semantic_update_type": "workflow_restructure",
+        "relation_action": "detach_children",
+        "child_proposal_ids": f"{kso.proposal_id},{gena.proposal_id}",
+        "status": "done",
+    }
+
+
+def test_rule_fallback_asks_before_unsupported_workflow_reparent() -> None:
+    decision = RuleBasedTeamTaskOperatingAgent().decide(
+        _message("서비스 구조 확인을 다른 상위 작업 아래로 옮겨줘"),
+        pending_approval_requests=(),
+        pending_proposals=(),
+    )
+
+    assert decision.action == "no_action"
+    assert decision.proposal_patches == ()
+    assert len(decision.clarification_questions) == 1
+    question = decision.clarification_questions[0]
+    assert question.recipient_id == "me"
+    assert question.missing_slots == ("relation_action",)
+    assert "독립 작업으로 분리" in question.prompt

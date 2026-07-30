@@ -1,14 +1,14 @@
 # Module Map: task-management-public-release
 
 - Target repo: `<repo-root>`
-- Generated at: `2026-06-13T12:02:13Z`
+- Generated at: `2026-07-30T05:12:49Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Module Dependency Diagram
 
 ```mermaid
 flowchart LR
-  src_tests["tests"] -->|28| dst_task_management["task_management"]
+  src_tests["tests"] -->|30| dst_task_management["task_management"]
 ```
 
 ## Python First-party Roots
