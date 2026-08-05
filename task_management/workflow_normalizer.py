@@ -10,6 +10,7 @@ from .domain import KIND_SPECS, Proposal
 from .relations import (
     DEPENDS_ON_PROPOSAL_IDS_KEY,
     MERGED_INTO_PROPOSAL_ID_KEY,
+    MERGED_DUPLICATE_PROPOSAL_IDS_KEY,
     PARENT_PROPOSAL_ID_KEY,
     RELATION_TYPE_KEY,
     SOURCE_CHANNEL_KEY,
@@ -465,6 +466,33 @@ def mark_source_text_duplicate(
     )
 
 
+def merge_explicit_duplicate(
+    canonical: Proposal,
+    duplicate: Proposal,
+    *,
+    normalized_at: datetime,
+) -> tuple[Proposal, Proposal]:
+    """Return the canonical/duplicate pair for an explicit user-approved merge.
+
+    Unlike automatic duplicate detection, this operation does not require exact
+    title, kind, or time equality. Target selection and authorization are
+    validated by the semantic patch service before this helper is called.
+    """
+
+    updated_canonical = _with_merged_duplicate_ids(
+        canonical,
+        (duplicate.proposal_id,),
+        normalized_at=normalized_at,
+    )
+    updated_duplicate = _mark_merged_duplicate(
+        duplicate,
+        canonical=updated_canonical,
+        normalized_at=normalized_at,
+        reason="explicit_semantic_duplicate_merge",
+    )
+    return updated_canonical, updated_duplicate
+
+
 def _normalize_new_duplicate_commitment(
     proposal: Proposal,
     existing_by_id: dict[str, Proposal],
@@ -605,12 +633,12 @@ def _with_merged_duplicate_ids(
     normalized_at: datetime,
 ) -> Proposal:
     metadata = dict(proposal.metadata)
-    merged = metadata.get("merged_duplicate_proposal_ids", "")
+    merged = metadata.get(MERGED_DUPLICATE_PROPOSAL_IDS_KEY, "")
     for proposal_id in duplicate_ids:
         merged = _append_csv_value(merged, proposal_id)
     if not merged:
         return proposal
-    metadata["merged_duplicate_proposal_ids"] = merged
+    metadata[MERGED_DUPLICATE_PROPOSAL_IDS_KEY] = merged
     metadata["duplicate_commitment_normalized_at"] = normalized_at.isoformat(timespec="seconds")
     return replace(proposal, metadata=metadata, updated_at=normalized_at)
 

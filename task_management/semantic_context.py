@@ -144,6 +144,14 @@ def build_operating_agent_context(
                 "supports leaf-child detachment; ask clarification for reparenting or nested-workflow moves. Never invent "
                 "ids; ask clarification when target or children are ambiguous."
             ),
+            "duplicate_merge_policy": (
+                "When the user explicitly says two existing items are the same or asks to merge them, emit one "
+                "apply_feedback patch with semantic_update_type=duplicate_merge. The patch proposal_id is the "
+                "duplicate/source item, request_id is its pending request when present, and "
+                "merge_target_proposal_id is the exact canonical target id from proposal_index/cards. Include the "
+                "desired final title or corrected slots when stated. Never encode a merge as a correction or "
+                "confirmation that leaves conflict_resolution pending."
+            ),
             "workflow_root_policy": (
                 "For study/meeting/event lifecycles, treat review discussions, schedule decisions, and prep meetings "
                 "as steps under a stable workflow root for the actual named event when that root can be inferred. "
@@ -153,7 +161,7 @@ def build_operating_agent_context(
             ),
             "patch_evidence_policy": "Each proposal patch must include target_confidence, evidence_text, assumptions, and missing_slots.",
             "semantic_update_types": (
-                "Use completion, progress, deferral, confirmation, correction, or workflow_restructure. Use correction "
+                "Use completion, progress, deferral, confirmation, correction, duplicate_merge, or workflow_restructure. Use correction "
                 "for explicit title/metadata/slot corrections without changing status; use workflow_restructure only "
                 "for validated changes to existing parent/child relations."
             ),

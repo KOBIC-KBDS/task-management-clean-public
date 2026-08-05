@@ -40,6 +40,7 @@ The older flow treated the semantic decision as mostly create/update followed by
 13. **Shared engineering memory.** Refactoring handoffs should update `docs/shared-context.md` with public-safe decisions, verification, and watchpoints so Codex, Claude Code, and human maintainers share the same current context.
 14. **General existing-work restructuring.** A private natural-language request can complete or retain an umbrella item while detaching explicitly named direct leaf children as standalone work. Exact IDs, current ownership, lifecycle state, pending approvals, nesting, and audit persistence remain deterministic safety gates.
 15. **State-preserving direct answers.** Explanation, status, reason, and “what should I do?” questions use a strict `direct_responses` envelope. The core validates the private-DM recipient, referenced proposal/request IDs, and confidence, then replies without mutating task or approval state.
+16. **Explicit duplicate merge.** When the user says two existing items are the same or asks to merge one into another, the agent names the exact source and canonical IDs. The core validates ownership, hierarchy, date compatibility, and conflict linkage, then atomically keeps the canonical item, rejects the duplicate as merge history, closes the source approval, and records audit events.
 
 ## Runtime intervention points
 
@@ -48,7 +49,7 @@ The older flow treated the semantic decision as mostly create/update followed by
 | Intake | `task_management/cli.py`, `task_management/slack_socket.py`, `task_management/slack_adapter.py`, `task_management/channels.py`, `task_management/source_refs.py` | Deterministic adapter | Socket Mode, polling, fixture, and CLI commands become `IncomingMessage` objects. Channel-specific id and source-reference semantics are centralized before persistence or dedupe. |
 | Context assembly | `task_management/orchestrator.py`, `task_management/proposal_intake.py`, `task_management/semantic_context.py`, `task_management/store.py` | Deterministic code | The orchestrator remains a coordinator while proposal intake and context assembly load active proposals, pending approvals, relations, recent audit evidence, and current workflow context. |
 | Semantic decision | `task_management/codex_operating_agent.py`, `task_management/claude_code_operating_agent.py`, `task_management/openai_operating_agent.py`, `task_management/operating_agent_prompt.py` | Codex / Claude / OpenAI semantic agent | The agent classifies no-action vs create vs update vs read-only response vs clarification, chooses semantic target candidates, and returns a strict JSON envelope. It is explicitly instructed to prefer stable workflow roots for event lifecycles. |
-| Envelope and policy gate | `task_management/orchestrator.py`, `task_management/semantic_patch_service.py`, `task_management/approval_flow.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py`, `task_management/feedback_scoring.py` | Deterministic code | Invalid decisions are refused; direct responses are checked for private recipient, accessible target IDs, and confidence; mutations still pass target evidence, missing-slot, approval, risk, conflict, and workflow gates. Explicit semantic rejection patches close approvals; low-evidence unrelated patches are rerouted as new work. |
+| Envelope and policy gate | `task_management/orchestrator.py`, `task_management/semantic_patch_service.py`, `task_management/approval_flow.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py`, `task_management/feedback_scoring.py` | Deterministic code | Invalid decisions are refused; direct responses are checked for private recipient, accessible target IDs, and confidence; mutations still pass target evidence, missing-slot, approval, risk, conflict, merge, and workflow gates. Explicit duplicate merges require exact source/target IDs and safe structural compatibility; semantic rejection patches close approvals; low-evidence unrelated patches are rerouted as new work. |
 | Workflow graph normalization | `task_management/workflow_normalizer.py`, `task_management/workflow_batch.py`, `task_management/relations.py`, `task_management/completion_linker.py`, `task_management/prep_subtasks.py` | Deterministic code, seeded by semantic evidence | New drafts and selected existing graphs are normalized around canonical workflow roots, parent/child relations, dependency edges, linked completion evidence, prep subtasks, and task/event duplicate commitments. |
 | State and history | `task_management/store.py`, `task_management/timeline.py`, `task_management/backfill_report.py` | Deterministic code | Proposals, approval requests, parent/child metadata, dependencies, timeline entries, outbound deliveries, and audit JSONL events are stored locally. Multi-proposal hierarchy changes and their audit rows share a transactional outbox. |
 | Human surfaces | `task_management/slack_home.py`, `task_management/secretary.py`, `task_management/frontend.py`, `task_management/human_view.py`, `task_management/hierarchy_view.py`, `task_management/work_item_state.py`, `task_management/sort_keys.py`, `task_management/korean_time.py` | Deterministic renderer | Slack replies, Slack Home, morning/afternoon/EOD briefings, and dashboard pages render hierarchy-aware work items with overdue sorting, shared Korean time parsing, and compact completed-child display. |
@@ -113,7 +114,10 @@ flowchart TD
   A[Incoming message with pending approvals] --> B[Semantic agent returns patch]
   B --> C{Patch is explicit approval rejection?}
   C -->|Yes| D[Close approval request and proposal as rejected]
-  C -->|No| T{Patch is terminal completion?}
+  C -->|No| M{Patch is explicit duplicate merge?}
+  M -->|Yes| N[Validate source target conflict hierarchy and date]
+  N --> O[Keep canonical reject duplicate and close source request atomically]
+  M -->|No| T{Patch is terminal completion?}
   T -->|Yes| U[Close pending request if present and mark target done]
   T -->|No| E{Target confidence and evidence pass?}
   E -->|No| F[Reject patch without mutating target]
@@ -123,6 +127,7 @@ flowchart TD
   I --> J[Run new-work intake without pending request pressure]
   J --> K[Create standalone task/event if parser finds one]
   D --> L[Render surfaces without missing-slot pressure]
+  O --> L
   U --> L
   F --> L
   H --> L
@@ -133,6 +138,7 @@ Practical interpretation:
 
 - A reply such as `reject approval/...` or a semantic `status=rejected` patch is a terminal approval decision, not an unsupported status update.
 - A completion patch is also terminal: it can close a pending request and mark the target done even when the original item was missing a date or time.
+- A same-item merge is structural, not a title correction. The source becomes rejected merge history, the canonical item inherits explicit/richer fields, and the source approval is closed so `conflict_resolution` cannot keep reappearing.
 - A message with a concrete time/place and meeting-like wording must not mutate an unrelated pending question unless it also carries credible target evidence.
 - If the semantic agent over-targets the pending card, deterministic code records the mismatch and gives the same message a second chance as a new item.
 - Rejected proposals are audit records, not active work: they stay available for counts/history but do not render as current schedule items, pending cards, or hierarchy children.
@@ -187,6 +193,27 @@ flowchart TD
 ```
 
 This rule is intentionally narrow. It does not merge arbitrary similarly named work. It only collapses a visible duplicate when one proposal is a task, the other is an event, and both point to the same normalized title, same date, and same non-empty time window. New-input normalization runs this check before approval/outbound handling so a duplicate incoming proposal is stored as audit history instead of creating another approval card. Existing-state backfill runs the same check so old task/event splits converge to the same single visible commitment model.
+
+## Explicit user-approved duplicate merge
+
+Automatic duplicate collapse remains narrow, but an explicit user instruction can resolve semantically equivalent items whose titles, kinds, or time precision differ.
+
+```mermaid
+flowchart TD
+  A[User says two existing items are the same or requests a merge] --> B[Semantic agent resolves exact source and canonical IDs]
+  B --> C[semantic_update_type duplicate_merge]
+  C --> D{Core validates actor target hierarchy date and conflict linkage}
+  D -->|Fail| E[Reject patch without changing either item]
+  D -->|Pass| F[Copy explicit and richer schedule fields to canonical]
+  F --> G[Keep canonical visible]
+  F --> H[Mark source rejected with merged_into_proposal_id]
+  F --> I[Close source approval request]
+  G --> J[Persist proposals approval decision and audit events atomically]
+  H --> J
+  I --> J
+```
+
+The core also recognizes the older merge envelopes that semantic backends may have emitted as `confirmation` or `correction` with `conflict_resolution=merge|same_event` and an exact merge target. Those envelopes are promoted to the same deterministic merge operation rather than being accepted as metadata-only corrections.
 
 ## Completion and linked scheduled commitments
 

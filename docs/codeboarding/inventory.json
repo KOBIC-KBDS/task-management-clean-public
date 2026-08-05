@@ -29,12 +29,12 @@
     ]
   },
   "counts": {
-    "files_scanned": 140,
+    "files_scanned": 141,
     "languages": {
       "HTML": 4,
       "JSON": 4,
       "Markdown": 18,
-      "Python": 95,
+      "Python": 96,
       "Shell": 1,
       "TOML": 1
     },
@@ -44,7 +44,7 @@
       ".json": 4,
       ".md": 18,
       ".png": 8,
-      ".py": 95,
+      ".py": 96,
       ".sh": 1,
       ".template": 2,
       ".toml": 1,
@@ -1994,6 +1994,12 @@
     {
       "internal": false,
       "kind": "python-from-import",
+      "source": "task_management/semantic_patch_service.py",
+      "target": "workflow_normalizer"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
       "source": "task_management/simulator.py",
       "target": "__future__"
     },
@@ -3422,6 +3428,48 @@
     {
       "internal": false,
       "kind": "python-from-import",
+      "source": "tests/test_duplicate_merge.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_duplicate_merge.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_duplicate_merge.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_duplicate_merge.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_duplicate_merge.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_duplicate_merge.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_duplicate_merge.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
       "source": "tests/test_encoding_contract.py",
       "target": "__future__"
     },
@@ -4182,13 +4230,13 @@
     {
       "language": "HTML",
       "path": "docs/agent-flow.html",
-      "size_bytes": 28252,
+      "size_bytes": 30536,
       "suffix": ".html"
     },
     {
       "language": "Markdown",
       "path": "docs/agent-flow.md",
-      "size_bytes": 23340,
+      "size_bytes": 25444,
       "suffix": ".md"
     },
     {
@@ -4200,7 +4248,7 @@
     {
       "language": "Markdown",
       "path": "docs/shared-context.md",
-      "size_bytes": 9624,
+      "size_bytes": 10480,
       "suffix": ".md"
     },
     {
@@ -4572,7 +4620,7 @@
     {
       "language": "Python",
       "path": "task_management/operating_agent_prompt.py",
-      "size_bytes": 14072,
+      "size_bytes": 14681,
       "suffix": ".py"
     },
     {
@@ -4614,7 +4662,7 @@
     {
       "language": "Python",
       "path": "task_management/relations.py",
-      "size_bytes": 17560,
+      "size_bytes": 17686,
       "suffix": ".py"
     },
     {
@@ -4632,13 +4680,13 @@
     {
       "language": "Python",
       "path": "task_management/semantic_context.py",
-      "size_bytes": 21831,
+      "size_bytes": 22521,
       "suffix": ".py"
     },
     {
       "language": "Python",
       "path": "task_management/semantic_patch_service.py",
-      "size_bytes": 45644,
+      "size_bytes": 55529,
       "suffix": ".py"
     },
     {
@@ -4740,7 +4788,7 @@
     {
       "language": "Python",
       "path": "task_management/store.py",
-      "size_bytes": 32671,
+      "size_bytes": 34314,
       "suffix": ".py"
     },
     {
@@ -4788,7 +4836,7 @@
     {
       "language": "Python",
       "path": "task_management/workflow_normalizer.py",
-      "size_bytes": 35000,
+      "size_bytes": 35906,
       "suffix": ".py"
     },
     {
@@ -4825,6 +4873,12 @@
       "language": "Python",
       "path": "tests/test_discussion_adapter.py",
       "size_bytes": 7380,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_duplicate_merge.py",
+      "size_bytes": 11396,
       "suffix": ".py"
     },
     {
@@ -4978,7 +5032,7 @@
       "suffix": ".py"
     }
   ],
-  "generated_at": "2026-08-05T01:38:35Z",
+  "generated_at": "2026-08-05T04:25:04Z",
   "important_configs": [
     ".codex/skills/slack-canvas-task-page/SKILL.md",
     "AGENTS.md",
@@ -5119,7 +5173,7 @@
     "ops/ \u2014 12 files; claude_code_backend_handoff.md (1), com.example.task-management.dashboard-http.plist.template (1), com.example.task-management.slack-live.plist.template (1), fresh_demo_install.md (1), human-message-contract.md (1), local_env_markdown_template.md (1)",
     "pyproject.toml",
     "task_management/ \u2014 65 files; __init__.py (1), approval_flow.py (1), approval_policy.py (1), attention.py (1), backfill_report.py (1), channels.py (1)",
-    "tests/ \u2014 30 files; test_claude_code_operating_agent.py (1), test_codex_operating_agent.py (1), test_commands_export_cli.py (1), test_direct_responses.py (1), test_discussion_adapter.py (1), test_encoding_contract.py (1)"
+    "tests/ \u2014 31 files; test_claude_code_operating_agent.py (1), test_codex_operating_agent.py (1), test_commands_export_cli.py (1), test_direct_responses.py (1), test_discussion_adapter.py (1), test_duplicate_merge.py (1)"
   ],
   "written_outputs": [
     "<repo-root>/docs/codeboarding/README.md",

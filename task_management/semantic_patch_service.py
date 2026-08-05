@@ -3,6 +3,8 @@ from __future__ import annotations
 from .relations import (
     ATTENDEES_KEY,
     COMPLETED_AT_KEY,
+    CONFLICT_DETECTED_KEY,
+    CONFLICT_WITH_PROPOSAL_IDS_KEY,
     DATE_WINDOW_END_KEY,
     DATE_WINDOW_LABEL_KEY,
     DATE_WINDOW_START_KEY,
@@ -18,6 +20,7 @@ from .relations import (
     LAST_STATE_LINKED_UPDATE_TYPE_KEY,
     LOCATION_KEY,
     LOCATION_OPTIONAL_KEY,
+    MERGE_TARGET_PROPOSAL_ID_KEY,
     NEEDS_EXACT_TIME_KEY,
     NEEDS_PREP_KEY,
     PARENT_PROPOSAL_ID_KEY,
@@ -56,6 +59,7 @@ from .completion_linker import related_commitments
 from .conflict_policy import recompute_missing_slots
 from .deferred_policy import csv_dedupe, default_deferred_until
 from .domain import (
+    ApprovalDecision,
     ApprovalRequest,
     OrchestrationResult,
     OutboundMessage,
@@ -71,6 +75,7 @@ from .update_messages import (
     _patch_rejection_message,
     _semantic_direct_update_message,
 )
+from .workflow_normalizer import merge_explicit_duplicate
 
 
 MIN_SEMANTIC_TARGET_CONFIDENCE = 0.65
@@ -150,7 +155,8 @@ class SemanticPatchService:
                 continue
 
             is_workflow_restructure = _is_workflow_restructure_update(patch.temporal_update)
-            if not is_workflow_restructure:
+            is_duplicate_merge = _is_duplicate_merge_update(patch.temporal_update)
+            if not (is_workflow_restructure or is_duplicate_merge):
                 self.store.append_event(
                     "agent.patch.accepted",
                     {
@@ -162,6 +168,12 @@ class SemanticPatchService:
                 )
             if is_workflow_restructure:
                 result = self._handle_workflow_restructure_patch(
+                    patch,
+                    actor_id=actor_id,
+                    changed_at=changed_at,
+                )
+            elif is_duplicate_merge:
+                result = self._handle_duplicate_merge_patch(
                     patch,
                     actor_id=actor_id,
                     changed_at=changed_at,
@@ -233,6 +245,12 @@ class SemanticPatchService:
                     proposal=proposal,
                     actor_id=actor_id,
                 )
+            if _is_duplicate_merge_update(patch.temporal_update):
+                return self._duplicate_merge_rejection_reason(
+                    patch,
+                    source=proposal,
+                    actor_id=actor_id,
+                )
             if _is_completion_update(patch.temporal_update):
                 if proposal.status == "rejected":
                     return "target_not_completable"
@@ -252,6 +270,12 @@ class SemanticPatchService:
         if patch.proposal_id and request.proposal_id != patch.proposal_id:
             return "proposal_request_mismatch"
         proposal = self.store.get_proposal(request.proposal_id)
+        if proposal is not None and _is_duplicate_merge_update(patch.temporal_update):
+            return self._duplicate_merge_rejection_reason(
+                patch,
+                source=proposal,
+                actor_id=actor_id,
+            )
         if proposal is not None and _is_workflow_restructure_update(patch.temporal_update):
             return self._workflow_restructure_rejection_reason(
                 patch,
@@ -262,6 +286,40 @@ class SemanticPatchService:
             return "target_not_completable"
         if proposal is not None and _looks_like_unrelated_new_work_patch(patch, proposal):
             return "target_mismatch_new_work"
+        return ""
+
+    def _duplicate_merge_rejection_reason(
+        self,
+        patch: ProposalPatch,
+        *,
+        source: Proposal,
+        actor_id: str,
+    ) -> str:
+        target_id = _duplicate_merge_target_id(patch.temporal_update)
+        if not target_id:
+            return "duplicate_merge_requires_target"
+        if target_id == source.proposal_id:
+            return "duplicate_merge_target_is_source"
+        target = self.store.get_proposal(target_id)
+        if target is None:
+            return "duplicate_merge_target_missing"
+        if source.status == "rejected" or target.status == "rejected":
+            return "duplicate_merge_target_not_active"
+        if not _actor_can_patch_proposal(target, actor_id):
+            return "actor_not_authorized_for_merge_target"
+        if parent_proposal_id(source) != parent_proposal_id(target):
+            return "duplicate_merge_hierarchy_mismatch"
+        conflict_ids = {
+            item.strip()
+            for item in source.metadata.get(CONFLICT_WITH_PROPOSAL_IDS_KEY, "").split(",")
+            if item.strip()
+        }
+        if source.metadata.get(CONFLICT_DETECTED_KEY) == "true" and conflict_ids and target_id not in conflict_ids:
+            return "duplicate_merge_target_not_in_conflict"
+        source_date = source.scheduled_date or source.due_date
+        target_date = target.scheduled_date or target.due_date
+        if source_date is not None and target_date is not None and source_date != target_date:
+            return "duplicate_merge_date_mismatch"
         return ""
 
     def _workflow_restructure_rejection_reason(
@@ -594,6 +652,165 @@ class SemanticPatchService:
                         "status": updated_parent.status,
                         "relation_action": action,
                         "child_proposal_ids": ",".join(child_ids),
+                    },
+                ),
+            ),
+        )
+
+    def _handle_duplicate_merge_patch(
+        self,
+        patch: ProposalPatch,
+        *,
+        actor_id: str,
+        changed_at: datetime,
+    ) -> OrchestrationResult:
+        source = self.store.get_proposal(patch.proposal_id)
+        target_id = _duplicate_merge_target_id(patch.temporal_update)
+        target = self.store.get_proposal(target_id)
+        if source is None or target is None:
+            return OrchestrationResult()
+
+        target_update = {
+            key: value
+            for key, value in patch.temporal_update.items()
+            if key in _SEMANTIC_CORRECTION_KEYS and value
+        }
+        if target.scheduled_date is None and source.scheduled_date is not None:
+            target_update.setdefault("scheduled_date", source.scheduled_date.isoformat())
+        elif target.due_date is None and target.scheduled_date is None and source.due_date is not None:
+            target_update.setdefault("due_date", source.due_date.isoformat())
+        if not target.time_window and source.time_window:
+            target_update.setdefault("time_window", source.time_window)
+        for key in (
+            PARTICIPANTS_KEY,
+            "external_owner",
+            EXTERNAL_PARTICIPANTS_KEY,
+            PARTICIPANT_LABEL_KEY,
+            ATTENDEES_KEY,
+            LOCATION_KEY,
+            LOCATION_OPTIONAL_KEY,
+            "materials",
+            NEEDS_PREP_KEY,
+            NEEDS_EXACT_TIME_KEY,
+        ):
+            if not target.metadata.get(key) and source.metadata.get(key):
+                target_update.setdefault(key, source.metadata[key])
+
+        changed_target = _apply_temporal_change(
+            target,
+            target_update,
+            actor_id=actor_id,
+            changed_at=changed_at,
+        )
+        target_missing_slots = (
+            target.missing_slots
+            if target.status in {"approved", "applied", "done"}
+            else recompute_missing_slots(changed_target)
+        )
+        changed_target = replace(
+            changed_target,
+            status=target.status,
+            required_approvers=target.required_approvers,
+            approvals=target.approvals,
+            missing_slots=target_missing_slots,
+            metadata={
+                **changed_target.metadata,
+                LAST_SEMANTIC_PATCH_ACTOR_ID_KEY: actor_id,
+                LAST_SEMANTIC_PATCH_AT_KEY: changed_at.isoformat(timespec="seconds"),
+                LAST_SEMANTIC_PATCH_CONFIDENCE_KEY: f"{patch.target_confidence:.2f}",
+                LAST_SEMANTIC_PATCH_EVIDENCE_KEY: patch.evidence_text,
+                LAST_STATE_LINKED_UPDATE_TYPE_KEY: "semantic_duplicate_merge",
+                "duplicate_merge_source_proposal_id": source.proposal_id,
+                "duplicate_merge_actor_id": actor_id,
+                "duplicate_merge_at": changed_at.isoformat(timespec="seconds"),
+            },
+            updated_at=changed_at,
+        )
+        canonical, duplicate = merge_explicit_duplicate(
+            changed_target,
+            source,
+            normalized_at=changed_at,
+        )
+
+        decided_request: ApprovalRequest | None = None
+        decision: ApprovalDecision | None = None
+        if patch.request_id:
+            request = self.store.get_approval_request(patch.request_id)
+            if request is not None:
+                decided_request = replace(request, status="accepted", decided_at=changed_at)
+                decision = ApprovalDecision(
+                    request_id=request.request_id,
+                    proposal_id=request.proposal_id,
+                    approver_id=actor_id,
+                    decision="accepted",
+                    decided_at=changed_at,
+                )
+
+        events: list[tuple[str, dict[str, object], datetime]] = [
+            (
+                "agent.patch.accepted",
+                {
+                    "patch": patch.to_payload(),
+                    "target_confidence": patch.target_confidence,
+                    "evidence_text": patch.evidence_text,
+                },
+                changed_at,
+            ),
+            (
+                "proposal.changed",
+                {
+                    "proposal": canonical,
+                    "change_body": patch.body,
+                    "actor_id": actor_id,
+                    "change_type": "semantic_duplicate_merge_target",
+                },
+                changed_at,
+            ),
+            (
+                "proposal.merged_duplicate",
+                {
+                    "proposal": duplicate,
+                    "canonical_proposal_id": canonical.proposal_id,
+                    "actor_id": actor_id,
+                    "reason": "explicit_semantic_duplicate_merge",
+                },
+                changed_at,
+            ),
+        ]
+        if decided_request is not None and decision is not None:
+            events.append(
+                (
+                    "approval.accepted",
+                    {
+                        "decision": decision,
+                        "reconciled": True,
+                        "reason": "explicit_semantic_duplicate_merge",
+                    },
+                    changed_at,
+                )
+            )
+        self.store.save_proposals_and_approval_with_audit_atomic(
+            (canonical, duplicate),
+            approval_request=decided_request,
+            approval_decision=decision,
+            events=events,
+        )
+        return OrchestrationResult(
+            proposals=(canonical, duplicate),
+            approval_requests=(decided_request,) if decided_request is not None else (),
+            outbound_messages=(
+                OutboundMessage(
+                    surface="personal_chat",
+                    recipient_id=actor_id,
+                    message_type="proposal_merged",
+                    text=f"병합했습니다: {source.title} → {canonical.title}. 이제 하나의 일정으로 관리합니다.",
+                    proposal_id=canonical.proposal_id,
+                    approval_request_id=patch.request_id,
+                    card={
+                        "proposal_id": canonical.proposal_id,
+                        "merged_proposal_id": duplicate.proposal_id,
+                        "title": canonical.title,
+                        "status": canonical.status,
                     },
                 ),
             ),
@@ -957,6 +1174,30 @@ def _is_workflow_restructure_update(update: dict[str, str]) -> bool:
     return update.get("semantic_update_type") == "workflow_restructure"
 
 
+def _is_duplicate_merge_update(update: dict[str, str]) -> bool:
+    target_id = _duplicate_merge_target_id(update)
+    if not target_id:
+        return False
+    if update.get("semantic_update_type") == "duplicate_merge":
+        return True
+    resolution = update.get("conflict_resolution", "").strip().lower()
+    return resolution in {
+        "merge",
+        "merge_existing",
+        "merge_with_existing",
+        "same_event",
+        "same_item",
+        "duplicate",
+    }
+
+
+def _duplicate_merge_target_id(update: dict[str, str]) -> str:
+    return (
+        update.get(MERGE_TARGET_PROPOSAL_ID_KEY, "")
+        or update.get("duplicate_of_proposal_id", "")
+    ).strip()
+
+
 def _requires_actionable_direct_patch(update: dict[str, str]) -> bool:
     if _is_scoped_progress_completion(update):
         return False
@@ -983,9 +1224,16 @@ def _semantic_update_shape_rejection(update: dict[str, str]) -> str:
         "deferral",
         "confirmation",
         "correction",
+        "duplicate_merge",
         "workflow_restructure",
     }:
         return "invalid_semantic_update_type"
+    if update_type == "duplicate_merge":
+        if status:
+            return "duplicate_merge_must_not_set_status"
+        if not _duplicate_merge_target_id(update):
+            return "duplicate_merge_requires_target"
+        return ""
     if update_type == "workflow_restructure":
         action = update.get(WORKFLOW_RELATION_ACTION_KEY, "")
         if action != WORKFLOW_DETACH_CHILDREN_ACTION:

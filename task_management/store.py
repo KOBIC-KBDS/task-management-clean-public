@@ -99,6 +99,43 @@ class TeamTaskStore:
             # JSONL is a projection; a later append/read/maintenance cycle retries it.
             pass
 
+    def save_proposals_and_approval_with_audit_atomic(
+        self,
+        proposals: Iterable[Proposal],
+        *,
+        approval_request: ApprovalRequest | None,
+        approval_decision: ApprovalDecision | None,
+        events: Iterable[tuple[str, dict[str, Any], datetime]],
+    ) -> None:
+        """Persist a structural proposal change and its approval resolution together."""
+
+        proposal_batch = tuple(proposals)
+        event_batch = tuple(events)
+        if (approval_request is None) != (approval_decision is None):
+            raise ValueError("approval_request_and_decision_must_be_paired")
+        with self._connect() as conn:
+            for proposal in proposal_batch:
+                _upsert_proposal(conn, proposal)
+            if approval_request is not None and approval_decision is not None:
+                _upsert_approval_request(conn, approval_request)
+                _upsert_approval_decision(conn, approval_decision)
+            for event_type, payload, occurred_at in event_batch:
+                conn.execute(
+                    """
+                    insert into audit_event_outbox(event_type, occurred_at, payload_json, delivered_at)
+                    values (?, ?, ?, null)
+                    """,
+                    (
+                        event_type,
+                        _dt(occurred_at),
+                        json.dumps(_json_safe(payload), ensure_ascii=False, sort_keys=True),
+                    ),
+                )
+        try:
+            self.flush_audit_outbox()
+        except (OSError, sqlite3.Error, json.JSONDecodeError):
+            pass
+
     def get_proposal(self, proposal_id: str) -> Proposal | None:
         with self._connect() as conn:
             row = conn.execute("select * from proposals where proposal_id = ?", (proposal_id,)).fetchone()
@@ -117,26 +154,7 @@ class TeamTaskStore:
 
     def save_approval_request(self, request: ApprovalRequest) -> None:
         with self._connect() as conn:
-            conn.execute(
-                """
-                insert into approval_requests(
-                    request_id, proposal_id, approver_id, status, requested_at, decided_at
-                )
-                values (?, ?, ?, ?, ?, ?)
-                on conflict(request_id) do update set
-                    status = excluded.status,
-                    decided_at = excluded.decided_at
-                where approval_requests.status = 'pending'
-                """,
-                (
-                    request.request_id,
-                    request.proposal_id,
-                    request.approver_id,
-                    request.status,
-                    _dt(request.requested_at),
-                    _dt(request.decided_at),
-                ),
-            )
+            _upsert_approval_request(conn, request)
 
     def get_approval_request(self, request_id: str) -> ApprovalRequest | None:
         with self._connect() as conn:
@@ -171,19 +189,7 @@ class TeamTaskStore:
 
     def save_approval_decision(self, decision: ApprovalDecision) -> None:
         with self._connect() as conn:
-            conn.execute(
-                """
-                insert or replace into approval_decisions(request_id, proposal_id, approver_id, decision, decided_at)
-                values (?, ?, ?, ?, ?)
-                """,
-                (
-                    decision.request_id,
-                    decision.proposal_id,
-                    decision.approver_id,
-                    decision.decision,
-                    _dt(decision.decided_at),
-                ),
-            )
+            _upsert_approval_decision(conn, decision)
 
     def mark_proposal_applied(self, proposal_id: str, export_item_id: str, *, applied_at: datetime) -> None:
         with self._connect() as conn:
@@ -707,6 +713,45 @@ def _upsert_proposal(conn: sqlite3.Connection, proposal: Proposal) -> None:
             metadata = excluded.metadata
         """,
         _proposal_row(proposal),
+    )
+
+
+def _upsert_approval_request(conn: sqlite3.Connection, request: ApprovalRequest) -> None:
+    conn.execute(
+        """
+        insert into approval_requests(
+            request_id, proposal_id, approver_id, status, requested_at, decided_at
+        )
+        values (?, ?, ?, ?, ?, ?)
+        on conflict(request_id) do update set
+            status = excluded.status,
+            decided_at = excluded.decided_at
+        where approval_requests.status = 'pending'
+        """,
+        (
+            request.request_id,
+            request.proposal_id,
+            request.approver_id,
+            request.status,
+            _dt(request.requested_at),
+            _dt(request.decided_at),
+        ),
+    )
+
+
+def _upsert_approval_decision(conn: sqlite3.Connection, decision: ApprovalDecision) -> None:
+    conn.execute(
+        """
+        insert or replace into approval_decisions(request_id, proposal_id, approver_id, decision, decided_at)
+        values (?, ?, ?, ?, ?)
+        """,
+        (
+            decision.request_id,
+            decision.proposal_id,
+            decision.approver_id,
+            decision.decision,
+            _dt(decision.decided_at),
+        ),
     )
 
 

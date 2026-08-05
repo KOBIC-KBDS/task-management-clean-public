@@ -54,6 +54,8 @@ COMPLETED_AT_KEY = "completed_at"
 
 # Merge / dedupe metadata.
 MERGED_INTO_PROPOSAL_ID_KEY = "merged_into_proposal_id"
+MERGED_DUPLICATE_PROPOSAL_IDS_KEY = "merged_duplicate_proposal_ids"
+MERGE_TARGET_PROPOSAL_ID_KEY = "merge_target_proposal_id"
 
 # Date-window metadata.
 DATE_WINDOW_START_KEY = "date_window_start"
