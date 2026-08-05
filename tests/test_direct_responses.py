@@ -164,6 +164,26 @@ def test_general_task_management_conversation_needs_no_tag_or_target(tmp_path: P
     assert "[요청]" not in result.outbound_messages[0].text
 
 
+def test_tagged_private_request_cannot_disappear_as_no_action(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    decision = OperatingAgentDecision(
+        action="no_action",
+        source="semantic_test",
+        confidence=0.2,
+        rationale="The backend failed to produce a structured result.",
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=StaticDecisionAgent(decision)).handle_message(
+        _message("[요청] 기존 작업을 정리해줘")
+    )
+
+    assert result.proposals == ()
+    assert result.outbound_messages[0].message_type == "explicit_request_unhandled"
+    assert result.outbound_messages[0].card["reason"] == "tagged_request_returned_no_action"
+    assert "임의로 바꾸지는 않았습니다" in result.outbound_messages[0].text
+    assert "agent.explicit_request.unhandled" in [event["type"] for event in store.read_events()]
+
+
 def test_direct_response_survives_a_same_turn_feedback_patch(tmp_path: Path) -> None:
     store = _store(tmp_path)
     proposal, request = _pending_mail()
@@ -242,7 +262,9 @@ def test_shared_prompt_routes_explanations_to_direct_responses() -> None:
 
     assert "use direct_responses" in prompt
     assert "Do not encode an explanation as a proposal_patch" in prompt
-    assert "`[요청]` is optional" in prompt
+    assert "`[요청]` is optional, but when present it is an explicit instruction" in prompt
+    assert "Never return no_action for a private `[요청]` message" in prompt
+    assert "Do not downgrade an imperative mutation request to a read-only response" in prompt
     assert "Never copy [요청] into a task title" in prompt
 
 

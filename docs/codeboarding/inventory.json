@@ -4212,7 +4212,7 @@
     {
       "language": "Markdown",
       "path": "README.md",
-      "size_bytes": 10639,
+      "size_bytes": 10865,
       "suffix": ".md"
     },
     {
@@ -4230,13 +4230,13 @@
     {
       "language": "HTML",
       "path": "docs/agent-flow.html",
-      "size_bytes": 30536,
+      "size_bytes": 31113,
       "suffix": ".html"
     },
     {
       "language": "Markdown",
       "path": "docs/agent-flow.md",
-      "size_bytes": 25444,
+      "size_bytes": 26005,
       "suffix": ".md"
     },
     {
@@ -4248,7 +4248,7 @@
     {
       "language": "Markdown",
       "path": "docs/shared-context.md",
-      "size_bytes": 10480,
+      "size_bytes": 11207,
       "suffix": ".md"
     },
     {
@@ -4410,7 +4410,7 @@
     {
       "language": "Markdown",
       "path": "ops/human-message-contract.md",
-      "size_bytes": 2673,
+      "size_bytes": 3066,
       "suffix": ".md"
     },
     {
@@ -4620,13 +4620,13 @@
     {
       "language": "Python",
       "path": "task_management/operating_agent_prompt.py",
-      "size_bytes": 14681,
+      "size_bytes": 15164,
       "suffix": ".py"
     },
     {
       "language": "Python",
       "path": "task_management/orchestrator.py",
-      "size_bytes": 34096,
+      "size_bytes": 35403,
       "suffix": ".py"
     },
     {
@@ -4680,13 +4680,13 @@
     {
       "language": "Python",
       "path": "task_management/semantic_context.py",
-      "size_bytes": 22521,
+      "size_bytes": 22979,
       "suffix": ".py"
     },
     {
       "language": "Python",
       "path": "task_management/semantic_patch_service.py",
-      "size_bytes": 55529,
+      "size_bytes": 56692,
       "suffix": ".py"
     },
     {
@@ -4866,7 +4866,7 @@
     {
       "language": "Python",
       "path": "tests/test_direct_responses.py",
-      "size_bytes": 13351,
+      "size_bytes": 14460,
       "suffix": ".py"
     },
     {
@@ -4956,7 +4956,7 @@
     {
       "language": "Python",
       "path": "tests/test_semantic_agent_contract.py",
-      "size_bytes": 40323,
+      "size_bytes": 41695,
       "suffix": ".py"
     },
     {
@@ -5032,7 +5032,7 @@
       "suffix": ".py"
     }
   ],
-  "generated_at": "2026-08-05T04:25:04Z",
+  "generated_at": "2026-08-05T04:57:19Z",
   "important_configs": [
     ".codex/skills/slack-canvas-task-page/SKILL.md",
     "AGENTS.md",

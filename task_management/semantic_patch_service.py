@@ -97,6 +97,44 @@ _SEMANTIC_CORRECTION_KEYS = (
     NEEDS_PREP_KEY,
     NEEDS_EXACT_TIME_KEY,
 )
+_ALLOWED_SEMANTIC_UPDATE_KEYS = frozenset(
+    {
+        "semantic_update_type",
+        "status",
+        "title",
+        "corrected_title",
+        "due_date",
+        "scheduled_date",
+        "time_window",
+        DATE_WINDOW_START_KEY,
+        DATE_WINDOW_END_KEY,
+        DATE_WINDOW_LABEL_KEY,
+        "needs_exact_date",
+        PARTICIPANTS_KEY,
+        "external_owner",
+        EXTERNAL_PARTICIPANTS_KEY,
+        PARTICIPANT_LABEL_KEY,
+        ATTENDEES_KEY,
+        LOCATION_KEY,
+        LOCATION_OPTIONAL_KEY,
+        "materials",
+        NEEDS_PREP_KEY,
+        NEEDS_EXACT_TIME_KEY,
+        "defer_missing_slots",
+        DEFERRED_UNTIL_KEY,
+        DEFERRED_REMINDER_CADENCE_HOURS_KEY,
+        PROGRESS_STATUS_KEY,
+        PROGRESS_PERCENT_KEY,
+        REMAINING_WORK_KEY,
+        "completion_scope",
+        WORKFLOW_RELATION_ACTION_KEY,
+        WORKFLOW_CHILD_PROPOSAL_IDS_KEY,
+        MERGE_TARGET_PROPOSAL_ID_KEY,
+        "duplicate_of_proposal_id",
+        "merge_target_title",
+        "conflict_resolution",
+    }
+)
 _SCOPED_COMPLETION_SCOPES = {
     "preparation",
     "prep",
@@ -1212,6 +1250,8 @@ def _has_correction_slot_update(update: dict[str, str]) -> bool:
 
 
 def _semantic_update_shape_rejection(update: dict[str, str]) -> str:
+    if any(key not in _ALLOWED_SEMANTIC_UPDATE_KEYS for key in update):
+        return "unsupported_semantic_update_keys"
     status = update.get("status", "")
     if status and status not in {"done", "confirmed"}:
         return "unsupported_status_patch"

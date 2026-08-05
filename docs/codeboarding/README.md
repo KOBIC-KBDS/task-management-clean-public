@@ -2,7 +2,7 @@
 
 - Target repo: `<repo-root>`
 - Output directory: `docs/codeboarding`
-- Generated at: `2026-08-05T04:25:04Z`
+- Generated at: `2026-08-05T04:57:19Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Start Here

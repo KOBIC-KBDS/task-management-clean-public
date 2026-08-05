@@ -119,7 +119,11 @@ def build_operating_agent_context(
                 "summaries without changing proposal or approval state. Use action=respond when no mutation is requested. The same "
                 "decision may include direct_responses plus drafts/patches for mixed intent. Attach exact proposal_id/"
                 "request_id when the answer concerns an existing item and use recipient_id=current sender. The [요청] "
-                "tag is optional: set interaction_label=request only when the literal tag is present; otherwise leave it "
+                "tag is optional, but when present it explicitly requires the body to be processed: answer a question, "
+                "emit a real draft/patch for an actionable mutation, or ask a concrete clarification. Never return "
+                "no_action for a private [요청] message and never downgrade an imperative mutation to a read-only "
+                "response. The tag does not bypass target, approval, risk, or mutation safety gates. Set "
+                "interaction_label=request only on direct responses to a literal tagged message; otherwise leave it "
                 "empty for a normal conversational reply. Never put [요청] in persisted task titles/types. "
                 "Do not turn an explanation into a needs_clarification patch and do not claim an external action ran."
             ),

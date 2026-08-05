@@ -23,10 +23,13 @@ For cross-agent refactoring handoffs, read and update [`docs/shared-context.md`]
 
 Ordinary private-DM conversation about tasks, planning, app behavior, drafts,
 or existing state can be answered without creating or changing work. `[요청]`
-is only an optional visual hint for an explicitly tagged ask; untagged messages
-receive normal conversational replies. The tag is not a task type and is never
-persisted in a task title merely because the user wrote it. One message may still
-combine a read-only answer with a separately validated task update.
+is optional, but when present it explicitly asks the runtime to process the body:
+answer the question, apply a supported and validated mutation, or ask a concrete
+clarification. It must not disappear as `no_action`, and it does not bypass target,
+approval, risk, or mutation gates. Untagged messages still receive normal
+conversational replies. The tag is not a task type and is never persisted in a
+task title merely because the user wrote it. One message may still combine a
+read-only answer with a separately validated task update.
 
 ## Deployment model
 

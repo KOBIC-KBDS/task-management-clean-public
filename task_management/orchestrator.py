@@ -239,6 +239,31 @@ class TeamTaskOrchestrator:
                         for proposal in state_updates
                     ),
                 )
+            if message.visibility == "private" and "[요청]" in message.text and not outbound:
+                self.store.append_event(
+                    "agent.explicit_request.unhandled",
+                    {
+                        "message_id": message.message_id,
+                        "decision_source": decision.source,
+                        "reason": "tagged_request_returned_no_action",
+                    },
+                    occurred_at=message.received_at,
+                )
+                outbound.append(
+                    OutboundMessage(
+                        surface="personal_chat",
+                        recipient_id=message.sender_id,
+                        message_type="explicit_request_unhandled",
+                        text=(
+                            "요청 내용을 처리할 구조화된 결과를 만들지 못했습니다. "
+                            "상태를 임의로 바꾸지는 않았습니다. 적용할 항목과 원하는 변경을 조금 더 구체적으로 알려주세요."
+                        ),
+                        card={
+                            "reason": "tagged_request_returned_no_action",
+                            "decision_source": decision.source,
+                        },
+                    )
+                )
             return OrchestrationResult(
                 proposals=tuple(proposals),
                 approval_requests=tuple(requests),

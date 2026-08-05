@@ -300,7 +300,9 @@ When refactoring this contract, update `docs/shared-context.md` with:
 
 ## Read-only request/answer path
 
-Ordinary private-DM conversation about tasks, planning, app behavior, draft wording, or existing state may emit `action=respond` with one or more `direct_responses`. The core validates that each response goes back to the current private-DM sender, checks referenced proposal/request IDs when present, and applies the confidence gate without changing proposal or approval state. `[요청]` is optional and only adds the small `*[요청]*` marker when the literal tag is present; untagged messages render as normal conversation.
+Ordinary private-DM conversation about tasks, planning, app behavior, draft wording, or existing state may emit `action=respond` with one or more `direct_responses`. The core validates that each response goes back to the current private-DM sender, checks referenced proposal/request IDs when present, and applies the confidence gate without changing proposal or approval state. `[요청]` is optional, but when present the body must be processed as an explicit instruction: answer it, emit a supported draft/patch, or ask a concrete clarification. A private tagged request cannot disappear as `no_action`; the tag still does not bypass target, approval, risk, or mutation gates. The small `*[요청]*` marker remains a rendering detail for direct answers, while untagged messages render as normal conversation.
+
+Semantic patch updates are strict as a complete envelope. If an agent returns an unsupported update key alongside a supported title/date correction, the core rejects the whole patch instead of partially applying the known fields and silently ignoring the requested operation.
 
 A single decision may contain both `direct_responses` and a real draft/patch. This allows the bot to explain what it understood and apply an explicitly requested correction in the same turn. Explanation text must never be hidden inside a rejected `needs_clarification` patch. If a semantic CLI times out, the conservative rule fallback may explain an exactly matched recent item, but it will ask for the target rather than guess.
 

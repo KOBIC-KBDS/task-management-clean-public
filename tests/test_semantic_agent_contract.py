@@ -914,6 +914,36 @@ def test_orchestrator_rejects_low_confidence_semantic_patch_without_mutating(tmp
     assert [event["type"] for event in events].count("proposal.approved") == 0
 
 
+def test_semantic_patch_rejects_unknown_update_keys_instead_of_partially_applying(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    proposal, request = _pending("기존 일정", "proposal/strict-shape", "approval/strict-shape")
+    proposal = replace(proposal, status="approved", missing_slots=(), approvals=("me",), title="기존 일정")
+    store.save_proposal(proposal)
+    patch = ProposalPatch(
+        request_id="",
+        proposal_id=proposal.proposal_id,
+        actor_id="me",
+        body="제목을 고치고 지원되지 않는 구조 변경도 적용",
+        temporal_update={
+            "semantic_update_type": "correction",
+            "title": "부분 적용되면 안 되는 제목",
+            "unsupported_relation_operation": "merge_something",
+        },
+        reason="strict_shape_regression",
+        target_confidence=0.99,
+        evidence_text="구조 변경도 적용",
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=StaticPatchAgent((patch,))).handle_message(
+        replace(_message("구조 변경도 적용"), message_id="dm/me/strict-shape")
+    )
+
+    unchanged = store.get_proposal(proposal.proposal_id)
+    assert unchanged is not None and unchanged.title == "기존 일정"
+    assert result.proposals == ()
+    assert result.outbound_messages[0].card["reason"] == "unsupported_semantic_update_keys"
+
+
 def _store(tmp_path: Path) -> TeamTaskStore:
     return TeamTaskStore(tmp_path / "task_management.sqlite3", tmp_path / "events.jsonl")
 

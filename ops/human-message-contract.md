@@ -45,8 +45,11 @@ but must not be asked again.
 
 Private-DM task/planning/app conversation may receive a normal read-only answer
 without a command prefix or task mutation. `[요청]` is an optional message-level
-interaction hint. It must not be copied into a task title, item type, or persisted
-task metadata merely because the user wrote it.
+instruction marker. When present, the body must be answered, converted into a
+supported validated mutation, or met with a concrete clarification; it must not
+silently become `no_action`. The marker does not bypass target, approval, risk,
+or mutation gates. It must not be copied into a task title, item type, or
+persisted task metadata merely because the user wrote it.
 
 - Read-only asks such as explanation, status, reason, or “what should I do?” use
   an `agent_direct_response` message and leave proposal/approval state unchanged.
@@ -54,6 +57,8 @@ task metadata merely because the user wrote it.
   untagged messages should look like ordinary conversation.
 - A message may ask for both an explanation and a real task change; render the
   answer and apply only the independently validated draft/patch.
+- Unsupported semantic update keys reject the whole patch; never apply only the
+  easy title/date fields while silently dropping the requested operation.
 - If the target is ambiguous, ask which existing item the user means. Do not
   create a new task from the question and do not disguise the answer as a
   rejected clarification patch.
