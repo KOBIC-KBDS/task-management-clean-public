@@ -29,7 +29,7 @@ section{position:relative;background:rgba(255,255,255,.92);border:1px solid var(
 </head>
 <body><div class="page">
 <div class="topbar"><div class="logo"><span class="logo-mark"></span><span>Task Management Runtime Demo</span></div><nav class="nav"><a href="#runtime-flow">Runtime flow</a><a href="../agent-flow.md">Docs</a></nav></div>
-<header class="brief"><div><div class="kicker">Codeboarding runtime flow</div><h1>메시지가 들어오면<br/>어떻게 처리되는지 보여줍니다</h1><p>Slack 메시지가 수신된 뒤 정규화, 오케스트레이션, 의미 해석, 정책 검증, 로컬 상태 반영, 출력 표면 갱신까지 이어지는 흐름을 단계별로 확인합니다. 화면에는 최종 사용자가 이해해야 할 처리 흐름만 노출합니다.</p></div><aside class="concept"><b>흐름 읽는 법</b><ol><li>현재 단계가 진하게 강조됩니다</li><li>다음 단계로 향하는 엣지만 움직입니다</li><li>오른쪽 패널에서 현재 입력과 결과를 봅니다</li><li>재생/다음 버튼으로 전체 경로를 확인합니다</li></ol><span>내부 생성 표기는 숨기고, 사용자는 처리 결과와 연결 관계만 봅니다.</span></aside></header>
+<header class="brief"><div><div class="kicker">Codeboarding runtime flow</div><h1>메시지가 들어오면<br/>어떻게 처리되는지 보여줍니다</h1><p>Slack 메시지가 수신된 뒤 정규화, 오케스트레이션, 의미 해석, 정책 검증, 로컬 상태 반영, 출력 표면 갱신까지 이어지는 흐름을 단계별로 확인합니다. 설명·조회 요청은 상태를 바꾸지 않는 직접응답 분기로 출력됩니다.</p></div><aside class="concept"><b>흐름 읽는 법</b><ol><li>현재 단계가 진하게 강조됩니다</li><li>다음 단계로 향하는 엣지만 움직입니다</li><li>오른쪽 패널에서 현재 입력과 결과를 봅니다</li><li>재생/다음 버튼으로 전체 경로를 확인합니다</li></ol><span>내부 생성 표기는 숨기고, 사용자는 처리 결과와 연결 관계만 봅니다.</span></aside></header>
 <p class="muted" style="margin:0 0 14px">Standalone public demo: clone the repository and open this file locally to play through the Slack message processing path. No tokens, workspace identifiers, local state, or external network calls are embedded.</p>
 <main id="runtime-flow" class="runtime-flow-app">
 <textarea id="notationText" class="source-buffer" aria-hidden="true" tabindex="-1" spellcheck="false"># task-management runtime flow
@@ -38,7 +38,7 @@ node slack "Slack" kind channel note "DM · Socket"
 node intake "수신/정규화" kind adapter note "payload → IncomingMessage"
 node orchestrator "오케스트레이터" kind core note "context + state"
 node agent "의미 해석" kind agent note "Decision JSON"
-node policy "정책 검증" kind policy note "approval · conflict"
+node policy "정책 검증" kind policy note "mutation · direct response"
 node store "로컬 상태" kind state note "SQLite + audit"
 node output "출력 표면" kind surface note "Slack · Home · Dashboard"
 
@@ -47,8 +47,9 @@ edge slack -> intake "payload"
 edge intake -> orchestrator "IncomingMessage"
 edge orchestrator -> agent "context"
 edge agent -> orchestrator "decision" back
-edge orchestrator -> policy "draft/patch"
+edge orchestrator -> policy "draft/patch/answer"
 edge policy -> store "commit"
+edge policy -> output "read-only reply"
 edge store -> output "render"
 edge output -> slack "reply" back
 

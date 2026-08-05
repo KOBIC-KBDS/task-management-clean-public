@@ -35,7 +35,9 @@ from .feedback_scoring import MIN_RUNNER_UP_GAP, MIN_TARGET_SCORE, pick_best_can
 
 
 OPERATING_AGENT_SCHEMA = "task-task_management.operating-agent.v1"
-OperatingAction = Literal["create_proposals", "apply_feedback", "no_action"]
+OperatingAction = Literal["create_proposals", "apply_feedback", "respond", "no_action"]
+DirectResponseType = Literal["answer", "explanation", "status_summary"]
+InteractionLabel = Literal["", "request"]
 
 PROPOSAL_DRAFT_OUTPUT_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -134,6 +136,32 @@ CLARIFICATION_QUESTION_OUTPUT_SCHEMA: dict[str, object] = {
 }
 
 
+DIRECT_RESPONSE_OUTPUT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "recipient_id",
+        "text",
+        "response_type",
+        "proposal_id",
+        "request_id",
+        "interaction_label",
+        "evidence_text",
+        "confidence",
+    ],
+    "properties": {
+        "recipient_id": {"type": "string"},
+        "text": {"type": "string"},
+        "response_type": {"type": "string", "enum": ["answer", "explanation", "status_summary"]},
+        "proposal_id": {"type": "string"},
+        "request_id": {"type": "string"},
+        "interaction_label": {"type": "string", "enum": ["", "request"]},
+        "evidence_text": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+}
+
+
 OPERATING_DECISION_OUTPUT_SCHEMA: dict[str, object] = {
     "type": "object",
     "additionalProperties": False,
@@ -145,16 +173,18 @@ OPERATING_DECISION_OUTPUT_SCHEMA: dict[str, object] = {
         "rationale",
         "proposal_drafts",
         "proposal_patches",
+        "direct_responses",
         "clarification_questions",
     ],
     "properties": {
         "schema": {"type": "string", "const": OPERATING_AGENT_SCHEMA},
-        "action": {"type": "string", "enum": ["create_proposals", "apply_feedback", "no_action"]},
+        "action": {"type": "string", "enum": ["create_proposals", "apply_feedback", "respond", "no_action"]},
         "source": {"type": "string"},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "rationale": {"type": "string"},
         "proposal_drafts": {"type": "array", "items": PROPOSAL_DRAFT_OUTPUT_SCHEMA},
         "proposal_patches": {"type": "array", "items": PROPOSAL_PATCH_OUTPUT_SCHEMA},
+        "direct_responses": {"type": "array", "items": DIRECT_RESPONSE_OUTPUT_SCHEMA},
         "clarification_questions": {"type": "array", "items": CLARIFICATION_QUESTION_OUTPUT_SCHEMA},
     },
 }
@@ -306,6 +336,32 @@ class ClarificationQuestion:
 
 
 @dataclass(frozen=True)
+class DirectResponse:
+    """Read-only agent answer rendered by the core without changing task state."""
+
+    recipient_id: str
+    text: str
+    response_type: DirectResponseType = "answer"
+    proposal_id: str = ""
+    request_id: str = ""
+    interaction_label: InteractionLabel = ""
+    evidence_text: str = ""
+    confidence: float = 1.0
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "recipient_id": self.recipient_id,
+            "text": self.text,
+            "response_type": self.response_type,
+            "proposal_id": self.proposal_id,
+            "request_id": self.request_id,
+            "interaction_label": self.interaction_label,
+            "evidence_text": self.evidence_text,
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
 class OperatingAgentDecision:
     """Strict decision envelope: the agent proposes, the core commits or rejects."""
 
@@ -315,6 +371,7 @@ class OperatingAgentDecision:
     rationale: str = ""
     proposal_drafts: tuple[ProposalDraft, ...] = ()
     proposal_patches: tuple[ProposalPatch, ...] = ()
+    direct_responses: tuple[DirectResponse, ...] = ()
     clarification_questions: tuple[ClarificationQuestion, ...] = ()
     schema: str = OPERATING_AGENT_SCHEMA
 
@@ -363,6 +420,13 @@ class RuleBasedTeamTaskOperatingAgent:
         pending_approval_requests: Sequence[ApprovalRequest],
         pending_proposals: Sequence[Proposal],
     ) -> OperatingAgentDecision:
+        direct_response = self._direct_response_decision(
+            message,
+            pending_approval_requests,
+            pending_proposals,
+        )
+        if direct_response is not None:
+            return direct_response
         feedback = self._feedback_decision(message, pending_approval_requests, pending_proposals)
         if feedback is not None:
             return feedback
@@ -391,6 +455,63 @@ class RuleBasedTeamTaskOperatingAgent:
             confidence=1.0,
             rationale="Parsed message into proposal drafts; core will apply approval and missing-slot policy.",
             proposal_drafts=drafts,
+        )
+
+    def _direct_response_decision(
+        self,
+        message: IncomingMessage,
+        pending_approval_requests: Sequence[ApprovalRequest],
+        pending_proposals: Sequence[Proposal],
+    ) -> OperatingAgentDecision | None:
+        """Conservative read-only fallback for explicit explanation/status questions.
+
+        The semantic backend remains primary. This path prevents a backend timeout
+        from turning a clear question about existing state into a new task or a
+        rejected clarification patch.
+        """
+
+        if message.visibility != "private" or not _has_direct_response_signal(message.text):
+            return None
+        proposal = _resolve_direct_response_target(message, pending_proposals, pending_approval_requests)
+        if proposal is None:
+            return OperatingAgentDecision(
+                action="no_action",
+                source="rule_based",
+                confidence=0.8,
+                rationale="The user asked a read-only question, but the existing item target was ambiguous.",
+                clarification_questions=(
+                    ClarificationQuestion(
+                        recipient_id=message.sender_id,
+                        prompt="어떤 항목에 대한 설명인지 작업 제목을 함께 알려주세요.",
+                        missing_slots=("target_proposal",),
+                    ),
+                ),
+            )
+        request = next(
+            (
+                item
+                for item in pending_approval_requests
+                if item.proposal_id == proposal.proposal_id and item.approver_id == message.sender_id
+            ),
+            None,
+        )
+        return OperatingAgentDecision(
+            action="respond",
+            source="rule_based",
+            confidence=0.9,
+            rationale="Explicit read-only question matched an existing proposal through current/recent context.",
+            direct_responses=(
+                DirectResponse(
+                    recipient_id=message.sender_id,
+                    text=_proposal_explanation_text(proposal, request=request),
+                    response_type="explanation",
+                    proposal_id=proposal.proposal_id,
+                    request_id=request.request_id if request else "",
+                    interaction_label="request",
+                    evidence_text=message.text,
+                    confidence=0.9,
+                ),
+            ),
         )
 
     def _feedback_decision(
@@ -645,6 +766,112 @@ def _resolve_feedback_target(candidates: tuple[Proposal, ...], text: str) -> Pro
     return pick_best_candidate(scored, min_score=MIN_TARGET_SCORE, min_gap=MIN_RUNNER_UP_GAP)
 
 
+def _has_direct_response_signal(text: str) -> bool:
+    compact = _compact_text(text)
+    return any(
+        token in compact
+        for token in (
+            "설명해",
+            "설명좀",
+            "무슨말",
+            "무슨뜻",
+            "뭘해야",
+            "무엇을해야",
+            "어떻게해야",
+            "왜필요",
+            "왜그런",
+            "상태알려",
+            "내용알려",
+            "보여줘",
+            "요약해",
+        )
+    )
+
+
+def _resolve_direct_response_target(
+    message: IncomingMessage,
+    pending_proposals: Sequence[Proposal],
+    pending_approval_requests: Sequence[ApprovalRequest],
+) -> Proposal | None:
+    proposals = tuple(pending_proposals)
+    if not proposals:
+        return None
+    current = _compact_text(message.text)
+    recent = _compact_text(
+        " ".join(
+            str(turn.get("text", ""))
+            for turn in message.recent_conversation
+            if isinstance(turn, Mapping)
+        )
+    )
+    request_by_id = {request.request_id: request for request in pending_approval_requests}
+    request_proposal_ids = {request.proposal_id for request in pending_approval_requests}
+    scored: list[tuple[int, int, Proposal]] = []
+    for proposal in proposals:
+        title = _compact_text(proposal.title)
+        score = 0
+        if proposal.proposal_id and proposal.proposal_id in message.text:
+            score = 100
+        if title and title in current:
+            score = max(score, 90)
+        if title and title in recent:
+            score = max(score, 80)
+        for request_id, request in request_by_id.items():
+            if request.proposal_id != proposal.proposal_id:
+                continue
+            if request_id in message.text:
+                score = max(score, 100)
+            if request_id in recent:
+                score = max(score, 85)
+        if score:
+            if proposal.proposal_id in request_proposal_ids:
+                score += 5
+            scored.append((score, len(title), proposal))
+    if scored:
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        if len(scored) > 1 and scored[0][:2] == scored[1][:2]:
+            return None
+        return scored[0][2]
+    if _has_anaphora_target(message.text):
+        request_targets = [
+            proposal
+            for proposal in proposals
+            if proposal.proposal_id in request_proposal_ids
+        ]
+        if len(request_targets) == 1:
+            return request_targets[0]
+    return None
+
+
+def _proposal_explanation_text(proposal: Proposal, *, request: ApprovalRequest | None) -> str:
+    workflow_title = proposal.metadata.get("workflow_title", "") or proposal.metadata.get("workflow_id", "")
+    external_owner = proposal.metadata.get("external_owner", "")
+    materials = proposal.metadata.get("materials", "")
+    risk_reason = proposal.metadata.get("risk_reason", "")
+    lines = [f"*{proposal.title}* 항목에 대한 설명입니다."]
+    if workflow_title or parent_proposal_id(proposal):
+        workflow = f" *{workflow_title}*" if workflow_title else " 기존 상위 작업"
+        lines.append(f"- ‘워크플로 단계’라는 표시는{workflow}에 연결된 후속 작업이라는 뜻입니다.")
+    if external_owner and materials:
+        lines.append(f"- 해야 할 일: *{external_owner}*에게 *{materials}* 관련 상세 정보를 요청합니다.")
+    elif external_owner:
+        lines.append(f"- 해야 할 일: *{external_owner}*와 관련된 `{proposal.title}` 작업을 진행합니다.")
+    else:
+        lines.append(f"- 해야 할 일: `{proposal.title}` 작업을 진행합니다.")
+    if risk_reason in {"external_email_sending", "external_message_sending"}:
+        lines.append("- 외부로 메일/메시지를 보내는 작업이라 실제 발송 전 별도 승인을 받도록 잡혀 있습니다.")
+    if request is not None and request.status == "pending":
+        lines.append("- 현재 확인 요청은 워크플로 단계를 더 만들라는 뜻이 아니라, 이 작업을 진행 대상으로 승인할지 묻는 것입니다.")
+        lines.append("- 진행하려면 승인, 하지 않으려면 거절, 나중에 정하려면 보류한다고 답하면 됩니다.")
+    if proposal.missing_slots:
+        lines.append(f"- 아직 확인되지 않은 정보: {', '.join(proposal.missing_slots)}")
+    if risk_reason in {"external_email_sending", "external_message_sending"}:
+        lines.append("- 이 앱은 작업과 승인 상태를 관리하며, 별도 실행 연동이 없는 외부 메일/메시지는 자동으로 발송하지 않습니다.")
+    else:
+        lines.append("- 이 앱은 작업 상태를 관리하며, 별도 실행 연동이 없는 외부 행동을 자동으로 수행하지는 않습니다.")
+    return "\n".join(lines)
+
+
 def _has_target_evidence(candidates: tuple[Proposal, ...], text: str) -> bool:
     clause_tokens = _semantic_tokens(text) - _GENERIC_FEEDBACK_TOKENS
     if not clause_tokens:
@@ -799,6 +1026,7 @@ def decision_to_payload(decision: OperatingAgentDecision) -> dict[str, object]:
         "rationale": decision.rationale,
         "proposal_drafts": [draft.to_payload() for draft in decision.proposal_drafts],
         "proposal_patches": [patch.to_payload() for patch in decision.proposal_patches],
+        "direct_responses": [response.to_payload() for response in decision.direct_responses],
         "clarification_questions": [question.to_payload() for question in decision.clarification_questions],
     }
     validate_operating_decision_payload(payload)
@@ -814,6 +1042,9 @@ def decision_from_payload(payload: Mapping[str, object]) -> OperatingAgentDecisi
         rationale=str(payload["rationale"]),
         proposal_drafts=tuple(_draft_from_payload(item) for item in _list_of_dicts(payload["proposal_drafts"])),
         proposal_patches=tuple(_patch_from_payload(item) for item in _list_of_dicts(payload["proposal_patches"])),
+        direct_responses=tuple(
+            _direct_response_from_payload(item) for item in _list_of_dicts(payload["direct_responses"])
+        ),
         clarification_questions=tuple(
             _question_from_payload(item) for item in _list_of_dicts(payload["clarification_questions"])
         ),
@@ -830,18 +1061,22 @@ def validate_operating_decision_payload(payload: Mapping[str, object]) -> None:
         raise ValueError(f"operating decision keys mismatch; missing={missing}, extra={extra}")
     if payload["schema"] != OPERATING_AGENT_SCHEMA:
         raise ValueError(f"unsupported operating decision schema: {payload['schema']!r}")
-    if payload["action"] not in {"create_proposals", "apply_feedback", "no_action"}:
+    if payload["action"] not in {"create_proposals", "apply_feedback", "respond", "no_action"}:
         raise ValueError(f"unsupported operating action: {payload['action']!r}")
     confidence = payload["confidence"]
     if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
         raise ValueError(f"confidence must be between 0 and 1: {confidence!r}")
-    for key in ("proposal_drafts", "proposal_patches", "clarification_questions"):
+    for key in ("proposal_drafts", "proposal_patches", "direct_responses", "clarification_questions"):
         if not isinstance(payload[key], list):
             raise ValueError(f"{key} must be a list")
     if payload["action"] == "create_proposals" and not payload["proposal_drafts"]:
         raise ValueError("create_proposals requires at least one proposal draft")
     if payload["action"] == "apply_feedback" and not payload["proposal_patches"]:
         raise ValueError("apply_feedback requires at least one proposal patch")
+    if payload["action"] == "respond" and not payload["direct_responses"]:
+        raise ValueError("respond requires at least one direct response")
+    if payload["action"] == "no_action" and payload["direct_responses"]:
+        raise ValueError("no_action cannot include direct responses")
     for item in _list_of_dicts(payload["proposal_drafts"]):
         _validate_keys(item, PROPOSAL_DRAFT_OUTPUT_SCHEMA, "proposal_drafts[]")
         _validate_choice(item["assigned_to"], ASSIGNEE_VALUES, "proposal_drafts[].assigned_to")
@@ -858,6 +1093,23 @@ def validate_operating_decision_payload(payload: Mapping[str, object]) -> None:
         for array_key in ("assumptions", "missing_slots"):
             if not isinstance(item[array_key], list) or any(not isinstance(value, str) for value in item[array_key]):
                 raise ValueError(f"proposal patch {array_key} must be a list of strings")
+    for item in _list_of_dicts(payload["direct_responses"]):
+        _validate_keys(item, DIRECT_RESPONSE_OUTPUT_SCHEMA, "direct_responses[]")
+        _validate_choice(
+            item["response_type"],
+            ("answer", "explanation", "status_summary"),
+            "direct_responses[].response_type",
+        )
+        _validate_choice(item["interaction_label"], ("", "request"), "direct_responses[].interaction_label")
+        response_confidence = item["confidence"]
+        if not isinstance(response_confidence, (int, float)) or not 0 <= response_confidence <= 1:
+            raise ValueError(
+                f"direct response confidence must be between 0 and 1: {response_confidence!r}"
+            )
+        if not str(item["recipient_id"]).strip():
+            raise ValueError("direct response recipient_id must not be empty")
+        if not str(item["text"]).strip():
+            raise ValueError("direct response text must not be empty")
     for item in _list_of_dicts(payload["clarification_questions"]):
         _validate_keys(item, CLARIFICATION_QUESTION_OUTPUT_SCHEMA, "clarification_questions[]")
 
@@ -962,8 +1214,21 @@ def _question_from_payload(item: Mapping[str, Any]) -> ClarificationQuestion:
     )
 
 
+def _direct_response_from_payload(item: Mapping[str, Any]) -> DirectResponse:
+    return DirectResponse(
+        recipient_id=str(item["recipient_id"]),
+        text=str(item["text"]),
+        response_type=str(item["response_type"]),  # type: ignore[arg-type]
+        proposal_id=str(item["proposal_id"]),
+        request_id=str(item["request_id"]),
+        interaction_label=str(item["interaction_label"]),  # type: ignore[arg-type]
+        evidence_text=str(item["evidence_text"]),
+        confidence=float(item["confidence"]),
+    )
+
+
 def _operating_action(value: object) -> OperatingAction:
-    if value not in {"create_proposals", "apply_feedback", "no_action"}:
+    if value not in {"create_proposals", "apply_feedback", "respond", "no_action"}:
         raise ValueError(f"unsupported operating action: {value!r}")
     return value  # type: ignore[return-value]
 

@@ -10,6 +10,7 @@ from .openai_operating_agent import OpenAIOperatingAgentConfig, OpenAIResponsesO
 from .operating_agent import (
     OPERATING_DECISION_OUTPUT_SCHEMA,
     OPERATING_AGENT_SCHEMA,
+    DirectResponse,
     OperatingAgentDecision,
     ProposalDraft,
     ProposalPatch,
@@ -40,6 +41,7 @@ __all__ = [
     "TeamTaskSimulator",
     "OPERATING_AGENT_SCHEMA",
     "OPERATING_DECISION_OUTPUT_SCHEMA",
+    "DirectResponse",
     "OperatingAgentDecision",
     "OpenAIOperatingAgentConfig",
     "OpenAIResponsesOperatingAgent",

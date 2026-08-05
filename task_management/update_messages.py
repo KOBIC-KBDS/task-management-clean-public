@@ -18,7 +18,7 @@ import hashlib
 
 from .approval_policy import team_message as _team_message
 from .domain import OutboundMessage, Proposal
-from .operating_agent import ProposalPatch
+from .operating_agent import DirectResponse, ProposalPatch
 
 
 def _shared_state_branch(proposal: Proposal, *, actor_id: str, suffix: str) -> OutboundMessage | None:
@@ -280,6 +280,24 @@ def _agent_clarification_message(
         card={
             "proposal_id": proposal_id,
             "missing_slots": ", ".join(missing_slots),
+        },
+    )
+
+
+def _agent_direct_response_message(response: DirectResponse) -> OutboundMessage:
+    label = "*[요청]*\n" if response.interaction_label == "request" else ""
+    return OutboundMessage(
+        surface="personal_chat",
+        recipient_id=response.recipient_id,
+        message_type="agent_direct_response",
+        text=f"{label}{response.text}",
+        proposal_id=response.proposal_id,
+        approval_request_id=response.request_id,
+        card={
+            "proposal_id": response.proposal_id,
+            "request_id": response.request_id,
+            "response_type": response.response_type,
+            "interaction_label": response.interaction_label,
         },
     )
 

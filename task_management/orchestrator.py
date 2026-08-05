@@ -31,6 +31,7 @@ from .approval_flow import (
     record_decision,
 )
 from .operating_agent import (
+    DirectResponse,
     TeamTaskOperatingAgent,
     OperatingAgentDecision,
     RuleBasedTeamTaskOperatingAgent,
@@ -41,6 +42,7 @@ from .pending_info import missing_info_followup_message
 from .semantic_context import recent_conversation_from_events
 from .update_messages import (
     _agent_clarification_message,
+    _agent_direct_response_message,
     _state_update_message,
 )
 from .relations import (
@@ -164,7 +166,7 @@ class TeamTaskOrchestrator:
             )
         proposals: list[Proposal] = []
         requests: list[ApprovalRequest] = []
-        outbound: list[OutboundMessage] = []
+        outbound: list[OutboundMessage] = list(self._validated_direct_response_messages(message, decision))
 
         if decision.action in {"apply_feedback", "create_proposals"} and decision.proposal_patches:
             feedback_result = self._patch_service.apply_patches(
@@ -207,7 +209,11 @@ class TeamTaskOrchestrator:
                             outbound_messages=tuple(outbound),
                         )
                 else:
-                    return feedback_result
+                    return OrchestrationResult(
+                        proposals=tuple(proposals),
+                        approval_requests=tuple(requests),
+                        outbound_messages=tuple(outbound),
+                    )
         if decision.clarification_questions:
             return OrchestrationResult(
                 proposals=tuple(proposals),
@@ -238,6 +244,8 @@ class TeamTaskOrchestrator:
                 approval_requests=tuple(requests),
                 outbound_messages=tuple(outbound),
             )
+        if decision.action == "respond":
+            return OrchestrationResult(outbound_messages=tuple(outbound))
 
         existing_proposals = self.store.list_proposals()
         if decision.proposal_drafts and decision_contains_workflow_batch(decision):
@@ -269,6 +277,73 @@ class TeamTaskOrchestrator:
             approval_requests=tuple(requests),
             outbound_messages=tuple(outbound),
         )
+
+    def _validated_direct_response_messages(
+        self,
+        message: IncomingMessage,
+        decision: OperatingAgentDecision,
+    ) -> tuple[OutboundMessage, ...]:
+        outbound: list[OutboundMessage] = []
+        for response in decision.direct_responses:
+            reason = self._direct_response_rejection_reason(message, response)
+            if reason:
+                self.store.append_event(
+                    "agent.direct_response.rejected",
+                    {
+                        "message_id": message.message_id,
+                        "recipient_id": response.recipient_id,
+                        "proposal_id": response.proposal_id,
+                        "request_id": response.request_id,
+                        "reason": reason,
+                    },
+                    occurred_at=message.received_at,
+                )
+                continue
+            outbound.append(_agent_direct_response_message(response))
+            self.store.append_event(
+                "agent.direct_response.accepted",
+                {
+                    "message_id": message.message_id,
+                    "recipient_id": response.recipient_id,
+                    "proposal_id": response.proposal_id,
+                    "request_id": response.request_id,
+                    "response_type": response.response_type,
+                    "interaction_label": response.interaction_label,
+                    "evidence_text": response.evidence_text,
+                    "confidence": response.confidence,
+                },
+                occurred_at=message.received_at,
+            )
+        return tuple(outbound)
+
+    def _direct_response_rejection_reason(self, message: IncomingMessage, response: DirectResponse) -> str:
+        if message.visibility != "private":
+            return "private_surface_required"
+        if response.recipient_id != message.sender_id:
+            return "recipient_mismatch"
+        if response.confidence < MIN_SEMANTIC_TARGET_CONFIDENCE:
+            return "low_confidence"
+        if not response.text.strip() or len(response.text) > 4000:
+            return "invalid_text"
+        proposal = self.store.get_proposal(response.proposal_id) if response.proposal_id else None
+        if response.proposal_id:
+            if proposal is None:
+                return "proposal_not_found"
+            if not (
+                proposal.proposer_id == message.sender_id
+                or proposal.assigned_to == message.sender_id
+                or message.sender_id in proposal.required_approvers
+            ):
+                return "proposal_access_denied"
+        if response.request_id:
+            request = self.store.get_approval_request(response.request_id)
+            if request is None:
+                return "request_not_found"
+            if request.approver_id != message.sender_id:
+                return "request_access_denied"
+            if response.proposal_id and request.proposal_id != response.proposal_id:
+                return "request_proposal_mismatch"
+        return ""
 
     def _persist_graph_normalization(
         self,

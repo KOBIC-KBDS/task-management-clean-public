@@ -1,7 +1,7 @@
 # Runtime Flow: task-management-public-release
 
 - Target repo: `<repo-root>`
-- Generated at: `2026-07-30T05:12:49Z`
+- Generated at: `2026-08-05T01:17:03Z`
 - Evidence source: manifest/config entrypoint scan by `repo_inventory.py`
 
 ## Runtime Entrypoint Diagram

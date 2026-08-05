@@ -39,6 +39,7 @@ The older flow treated the semantic decision as mostly create/update followed by
 12. **Runtime resilience.** Socket reconnect backoff, fast-cycle guards, deferred reminder ticking, and transient Slack send retries keep clean deployments closer to the live operating shape without committing live state.
 13. **Shared engineering memory.** Refactoring handoffs should update `docs/shared-context.md` with public-safe decisions, verification, and watchpoints so Codex, Claude Code, and human maintainers share the same current context.
 14. **General existing-work restructuring.** A private natural-language request can complete or retain an umbrella item while detaching explicitly named direct leaf children as standalone work. Exact IDs, current ownership, lifecycle state, pending approvals, nesting, and audit persistence remain deterministic safety gates.
+15. **State-preserving direct answers.** Explanation, status, reason, and “what should I do?” questions use a strict `direct_responses` envelope. The core validates the private-DM recipient, referenced proposal/request IDs, and confidence, then replies without mutating task or approval state.
 
 ## Runtime intervention points
 
@@ -46,8 +47,8 @@ The older flow treated the semantic decision as mostly create/update followed by
 | --- | --- | --- | --- |
 | Intake | `task_management/cli.py`, `task_management/slack_socket.py`, `task_management/slack_adapter.py`, `task_management/channels.py`, `task_management/source_refs.py` | Deterministic adapter | Socket Mode, polling, fixture, and CLI commands become `IncomingMessage` objects. Channel-specific id and source-reference semantics are centralized before persistence or dedupe. |
 | Context assembly | `task_management/orchestrator.py`, `task_management/proposal_intake.py`, `task_management/semantic_context.py`, `task_management/store.py` | Deterministic code | The orchestrator remains a coordinator while proposal intake and context assembly load active proposals, pending approvals, relations, recent audit evidence, and current workflow context. |
-| Semantic decision | `task_management/codex_operating_agent.py`, `task_management/claude_code_operating_agent.py`, `task_management/openai_operating_agent.py`, `task_management/operating_agent_prompt.py` | Codex / Claude / OpenAI semantic agent | The agent classifies no-action vs create vs update vs clarification, chooses semantic target candidates, and returns a strict JSON envelope. It is explicitly instructed to prefer stable workflow roots for event lifecycles. |
-| Envelope and policy gate | `task_management/semantic_patch_service.py`, `task_management/approval_flow.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py`, `task_management/feedback_scoring.py` | Deterministic code | Invalid decisions are refused; target evidence, missing slots, approval requirements, risky auto-approval, conflicts, and existing-workflow mutations are handled before state changes. Explicit semantic rejection patches close approvals; low-evidence unrelated patches are rerouted as new work. |
+| Semantic decision | `task_management/codex_operating_agent.py`, `task_management/claude_code_operating_agent.py`, `task_management/openai_operating_agent.py`, `task_management/operating_agent_prompt.py` | Codex / Claude / OpenAI semantic agent | The agent classifies no-action vs create vs update vs read-only response vs clarification, chooses semantic target candidates, and returns a strict JSON envelope. It is explicitly instructed to prefer stable workflow roots for event lifecycles. |
+| Envelope and policy gate | `task_management/orchestrator.py`, `task_management/semantic_patch_service.py`, `task_management/approval_flow.py`, `task_management/approval_policy.py`, `task_management/slot_validator.py`, `task_management/conflict_policy.py`, `task_management/feedback_scoring.py` | Deterministic code | Invalid decisions are refused; direct responses are checked for private recipient, accessible target IDs, and confidence; mutations still pass target evidence, missing-slot, approval, risk, conflict, and workflow gates. Explicit semantic rejection patches close approvals; low-evidence unrelated patches are rerouted as new work. |
 | Workflow graph normalization | `task_management/workflow_normalizer.py`, `task_management/workflow_batch.py`, `task_management/relations.py`, `task_management/completion_linker.py`, `task_management/prep_subtasks.py` | Deterministic code, seeded by semantic evidence | New drafts and selected existing graphs are normalized around canonical workflow roots, parent/child relations, dependency edges, linked completion evidence, prep subtasks, and task/event duplicate commitments. |
 | State and history | `task_management/store.py`, `task_management/timeline.py`, `task_management/backfill_report.py` | Deterministic code | Proposals, approval requests, parent/child metadata, dependencies, timeline entries, outbound deliveries, and audit JSONL events are stored locally. Multi-proposal hierarchy changes and their audit rows share a transactional outbox. |
 | Human surfaces | `task_management/slack_home.py`, `task_management/secretary.py`, `task_management/frontend.py`, `task_management/human_view.py`, `task_management/hierarchy_view.py`, `task_management/work_item_state.py`, `task_management/sort_keys.py`, `task_management/korean_time.py` | Deterministic renderer | Slack replies, Slack Home, morning/afternoon/EOD briefings, and dashboard pages render hierarchy-aware work items with overdue sorting, shared Korean time parsing, and compact completed-child display. |
@@ -68,8 +69,10 @@ flowchart TD
   F --> I[Strict JSON decision envelope]
   G --> I
   H --> I
-  I --> J[Envelope validation]
-  J --> K[SemanticPatchService + approval / slot / conflict policy]
+  I --> J{Envelope validation}
+  J -->|direct response| T[Recipient + target + confidence gate]
+  T --> O
+  J -->|draft / patch| K[SemanticPatchService + approval / slot / conflict policy]
   K --> L[WorkflowBatch + graph normalization]
   L --> M[(Local SQLite state)]
   L --> N[JSONL audit events]
@@ -257,6 +260,7 @@ The semantic agent should answer these questions and return them through the str
 - Is the item a parent workflow, child step, dependency, post-event deliverable, or completion evidence?
 - Which slots are known, missing, deferred, or risky to auto-approve?
 - What evidence text and confidence support the decision?
+- Is this a read-only explanation/status request that must leave proposal and approval state unchanged?
 
 The deterministic layer then decides whether the envelope is valid, whether approval is required, whether hierarchy should be normalized, and what should be persisted.
 
@@ -266,6 +270,12 @@ When refactoring this contract, update `docs/shared-context.md` with:
 - why deterministic safety still holds,
 - which tests prove it,
 - and any watchpoints for the next Codex or Claude Code session.
+
+## Read-only request/answer path
+
+Explicit questions such as `[요청] 이 항목이 무슨 뜻인지 설명해줘` are interaction requests, not a new task type. The agent emits `action=respond` with one or more `direct_responses`; the core validates that each response goes back to the current private-DM sender, references accessible proposal/request IDs, and meets the confidence gate. The core then renders a small `*[요청]*` marker without changing proposal or approval state.
+
+A single decision may contain both `direct_responses` and a real draft/patch. This allows the bot to explain what it understood and apply an explicitly requested correction in the same turn. Explanation text must never be hidden inside a rejected `needs_clarification` patch. If a semantic CLI times out, the conservative rule fallback may explain an exactly matched recent item, but it will ask for the target rather than guess.
 
 ## General existing-work requests
 

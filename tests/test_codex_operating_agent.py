@@ -88,6 +88,7 @@ class MetadataJsonCodexRunner:
                     }
                 ],
                 "proposal_patches": [],
+                "direct_responses": [],
                 "clarification_questions": [],
             },
             ensure_ascii=False,
@@ -127,6 +128,7 @@ class PatchJsonCodexRunner:
                         "reason": "resolve_pending_question",
                     }
                 ],
+                "direct_responses": [],
                 "clarification_questions": [],
             },
             ensure_ascii=False,

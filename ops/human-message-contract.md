@@ -40,3 +40,17 @@ personal Slack DM.
 End-of-day reviews should be scoped to the user's remaining items and must not
 sound like a team-wide status rollup. Completed items may be listed as evidence
 but must not be asked again.
+
+## Explicit request marker
+
+`[요청]` is a message-level interaction hint. It must not be copied into a task
+title, item type, or persisted task metadata merely because the user wrote it.
+
+- Read-only asks such as explanation, status, reason, or “what should I do?” use
+  an `agent_direct_response` message and leave proposal/approval state unchanged.
+- The rendered answer may begin with the small Slack marker `*[요청]*`.
+- A message may ask for both an explanation and a real task change; render the
+  answer and apply only the independently validated draft/patch.
+- If the target is ambiguous, ask which existing item the user means. Do not
+  create a new task from the question and do not disguise the answer as a
+  rejected clarification patch.

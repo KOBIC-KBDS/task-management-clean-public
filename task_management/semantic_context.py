@@ -62,11 +62,12 @@ def build_operating_agent_context(
     return {
         "schema": OPERATING_AGENT_SCHEMA,
         "semantic_contract": {
-            "north_star": "LLM reads human message plus active state context and emits strict proposal drafts or targeted patches.",
+            "north_star": "LLM reads human message plus active state context and emits strict proposals, targeted patches, or read-only answers.",
             "agent_role": "semantic_interpreter_only",
             "core_role": "validate_schema_apply_policy_persist_state_render_messages_preview_only_task_core",
             "must_resolve_target_before_slots": True,
             "multi_patch_allowed": True,
+            "mixed_response_and_mutation_allowed": True,
             "low_confidence_policy": "ask_clarification_do_not_mutate",
         },
         "today": message.received_at.date().isoformat(),
@@ -89,7 +90,7 @@ def build_operating_agent_context(
         "rules": {
             "agent_role": "interpret task_management messages and propose next actions only",
             "state_owner": "TeamTaskOrchestrator/core commits all SQLite, approval, export, and calendar state changes",
-            "allowed_actions": ["create_proposals", "apply_feedback", "no_action"],
+            "allowed_actions": ["create_proposals", "apply_feedback", "respond", "no_action"],
             "actors": list(ASSIGNEE_VALUES),
             "allowed_item_types": list(PROPOSAL_KIND_VALUES),
             "slack_notification_policy": (
@@ -102,12 +103,22 @@ def build_operating_agent_context(
             "no_action_policy": (
                 "DM and channel differ by nature. A private DM (visibility=private) is the user speaking directly "
                 "to the bot, so it must never be silently dropped: always emit create_proposals when there is a "
-                "task/event/routine/commitment, otherwise set clarification_questions to confirm intent — including "
+                "task/event/routine/commitment, use direct_responses for read-only questions, otherwise set "
+                "clarification_questions to confirm intent — including "
                 "whether a casually phrased self-plan (하하 ... 저녁 먹을거야), a time, or an activity should be tracked. "
                 "Reserve no_action in a DM for a pure greeting/acknowledgement only; when unsure, ask rather than "
                 "stay silent. A team-channel message (visibility=team), by contrast, may not target the bot or user "
                 "at all, so letting it pass with no_action is acceptable there, subject to slack_notification_policy "
                 "(mention-required / allowlist)."
+            ),
+            "direct_response_policy": (
+                "When a private-DM user asks what an existing item/status/approval/workflow prompt means, why it is "
+                "needed, what to do, or asks to explain/show/summarize it, answer through direct_responses without "
+                "changing proposal or approval state. Use action=respond when no mutation is requested. The same "
+                "decision may include direct_responses plus drafts/patches for mixed intent. Attach exact proposal_id/"
+                "request_id when known, use recipient_id=current sender, and set interaction_label=request for explicit "
+                "asks such as [요청]/설명해줘/알려줘/보여줘/왜. Never put [요청] in persisted task titles/types. "
+                "Do not turn an explanation into a needs_clarification patch and do not claim an external action ran."
             ),
             "date_fields": "Use ISO YYYY-MM-DD or empty string. Do not invent exact dates when a window is ambiguous.",
             "approval_policy": "Do not mark approved in agent output; core decides approval requests and statuses.",

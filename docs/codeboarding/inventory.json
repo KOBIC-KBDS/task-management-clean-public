@@ -29,12 +29,12 @@
     ]
   },
   "counts": {
-    "files_scanned": 139,
+    "files_scanned": 140,
     "languages": {
       "HTML": 4,
       "JSON": 4,
       "Markdown": 18,
-      "Python": 94,
+      "Python": 95,
       "Shell": 1,
       "TOML": 1
     },
@@ -44,7 +44,7 @@
       ".json": 4,
       ".md": 18,
       ".png": 8,
-      ".py": 94,
+      ".py": 95,
       ".sh": 1,
       ".template": 2,
       ".toml": 1,
@@ -3362,6 +3362,48 @@
     {
       "internal": false,
       "kind": "python-from-import",
+      "source": "tests/test_direct_responses.py",
+      "target": "__future__"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_direct_responses.py",
+      "target": "dataclasses"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_direct_responses.py",
+      "target": "datetime"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_direct_responses.py",
+      "target": "pathlib"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
+      "source": "tests/test_direct_responses.py",
+      "target": "typing"
+    },
+    {
+      "internal": false,
+      "kind": "python-import",
+      "source": "tests/test_direct_responses.py",
+      "target": "pytest"
+    },
+    {
+      "internal": true,
+      "kind": "python-from-import",
+      "source": "tests/test_direct_responses.py",
+      "target": "task_management"
+    },
+    {
+      "internal": false,
+      "kind": "python-from-import",
       "source": "tests/test_discussion_adapter.py",
       "target": "__future__"
     },
@@ -4122,7 +4164,7 @@
     {
       "language": "Markdown",
       "path": "README.md",
-      "size_bytes": 10114,
+      "size_bytes": 10526,
       "suffix": ".md"
     },
     {
@@ -4146,7 +4188,7 @@
     {
       "language": "Markdown",
       "path": "docs/agent-flow.md",
-      "size_bytes": 21762,
+      "size_bytes": 23264,
       "suffix": ".md"
     },
     {
@@ -4158,7 +4200,7 @@
     {
       "language": "Markdown",
       "path": "docs/shared-context.md",
-      "size_bytes": 8176,
+      "size_bytes": 8982,
       "suffix": ".md"
     },
     {
@@ -4176,7 +4218,7 @@
     {
       "language": "HTML",
       "path": "docs/agent-flow-demo/index.html",
-      "size_bytes": 26123,
+      "size_bytes": 26185,
       "suffix": ".html"
     },
     {
@@ -4320,7 +4362,7 @@
     {
       "language": "Markdown",
       "path": "ops/human-message-contract.md",
-      "size_bytes": 1709,
+      "size_bytes": 2468,
       "suffix": ".md"
     },
     {
@@ -4368,7 +4410,7 @@
     {
       "language": "Python",
       "path": "task_management/__init__.py",
-      "size_bytes": 2350,
+      "size_bytes": 2392,
       "suffix": ".py"
     },
     {
@@ -4422,7 +4464,7 @@
     {
       "language": "Python",
       "path": "task_management/codex_operating_agent.py",
-      "size_bytes": 18732,
+      "size_bytes": 19933,
       "suffix": ".py"
     },
     {
@@ -4524,19 +4566,19 @@
     {
       "language": "Python",
       "path": "task_management/operating_agent.py",
-      "size_bytes": 39768,
+      "size_bytes": 51310,
       "suffix": ".py"
     },
     {
       "language": "Python",
       "path": "task_management/operating_agent_prompt.py",
-      "size_bytes": 12214,
+      "size_bytes": 13839,
       "suffix": ".py"
     },
     {
       "language": "Python",
       "path": "task_management/orchestrator.py",
-      "size_bytes": 30599,
+      "size_bytes": 34096,
       "suffix": ".py"
     },
     {
@@ -4590,7 +4632,7 @@
     {
       "language": "Python",
       "path": "task_management/semantic_context.py",
-      "size_bytes": 20488,
+      "size_bytes": 21531,
       "suffix": ".py"
     },
     {
@@ -4728,7 +4770,7 @@
     {
       "language": "Python",
       "path": "task_management/update_messages.py",
-      "size_bytes": 14422,
+      "size_bytes": 15123,
       "suffix": ".py"
     },
     {
@@ -4764,13 +4806,19 @@
     {
       "language": "Python",
       "path": "tests/test_codex_operating_agent.py",
-      "size_bytes": 12766,
+      "size_bytes": 12846,
       "suffix": ".py"
     },
     {
       "language": "Python",
       "path": "tests/test_commands_export_cli.py",
       "size_bytes": 23308,
+      "suffix": ".py"
+    },
+    {
+      "language": "Python",
+      "path": "tests/test_direct_responses.py",
+      "size_bytes": 12050,
       "suffix": ".py"
     },
     {
@@ -4930,7 +4978,7 @@
       "suffix": ".py"
     }
   ],
-  "generated_at": "2026-07-30T05:12:49Z",
+  "generated_at": "2026-08-05T01:17:03Z",
   "important_configs": [
     ".codex/skills/slack-canvas-task-page/SKILL.md",
     "AGENTS.md",
@@ -5071,7 +5119,7 @@
     "ops/ \u2014 12 files; claude_code_backend_handoff.md (1), com.example.task-management.dashboard-http.plist.template (1), com.example.task-management.slack-live.plist.template (1), fresh_demo_install.md (1), human-message-contract.md (1), local_env_markdown_template.md (1)",
     "pyproject.toml",
     "task_management/ \u2014 65 files; __init__.py (1), approval_flow.py (1), approval_policy.py (1), attention.py (1), backfill_report.py (1), channels.py (1)",
-    "tests/ \u2014 29 files; test_claude_code_operating_agent.py (1), test_codex_operating_agent.py (1), test_commands_export_cli.py (1), test_discussion_adapter.py (1), test_encoding_contract.py (1), test_external_collaboration_context.py (1)"
+    "tests/ \u2014 30 files; test_claude_code_operating_agent.py (1), test_codex_operating_agent.py (1), test_commands_export_cli.py (1), test_direct_responses.py (1), test_discussion_adapter.py (1), test_encoding_contract.py (1)"
   ],
   "written_outputs": [
     "<repo-root>/docs/codeboarding/README.md",

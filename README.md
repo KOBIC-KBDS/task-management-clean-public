@@ -6,7 +6,7 @@ The system turns natural Korean Slack messages into structured task/event/routin
 
 ## Product Principle
 
-The operating agent is the semantic engine. It should read each message with active task context, decide whether the message creates a new item or updates an existing one, and return a strict JSON decision envelope. Deterministic code validates and commits the decision safely.
+The operating agent is the semantic engine. It should read each message with active task context, decide whether the message creates a new item, updates existing work, or asks for a read-only explanation/status answer, and return a strict JSON decision envelope. Deterministic code validates mutations and direct responses separately.
 
 ```text
 Slack app message + active local task context
@@ -20,6 +20,12 @@ Rules/keyword parsing is a fallback and test aid, not the product core.
 Start with [`docs/agent-flow.md`](docs/agent-flow.md) to understand how the semantic agent, deterministic policy, workflow normalizer, backfill path, and human-facing surfaces work together.
 A rendered preview is available at [`docs/agent-flow.html`](docs/agent-flow.html), and the older standalone interactive runtime-flow demo remains at [`docs/agent-flow-demo/index.html`](docs/agent-flow-demo/index.html).
 For cross-agent refactoring handoffs, read and update [`docs/shared-context.md`](docs/shared-context.md) before and after meaningful changes.
+
+`[요청]` is an optional interaction hint for explicit asks. It is not a task type
+and is never persisted in a task title merely because the user wrote it. Questions
+about an existing item are answered without closing, approving, or otherwise
+changing that item; one message may still combine a read-only answer with a
+separately validated task update.
 
 ## Deployment model
 
