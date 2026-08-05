@@ -102,22 +102,25 @@ def build_operating_agent_context(
             ),
             "no_action_policy": (
                 "DM and channel differ by nature. A private DM (visibility=private) is the user speaking directly "
-                "to the bot, so it must never be silently dropped: always emit create_proposals when there is a "
-                "task/event/routine/commitment, use direct_responses for read-only questions, otherwise set "
+                "to the bot, so it must never be silently dropped: emit create_proposals when there is a "
+                "task/event/routine/commitment, use direct_responses for useful ordinary conversation and read-only "
+                "questions, otherwise set "
                 "clarification_questions to confirm intent — including "
                 "whether a casually phrased self-plan (하하 ... 저녁 먹을거야), a time, or an activity should be tracked. "
-                "Reserve no_action in a DM for a pure greeting/acknowledgement only; when unsure, ask rather than "
-                "stay silent. A team-channel message (visibility=team), by contrast, may not target the bot or user "
+                "A greeting or acknowledgement may receive a brief conversational response when useful. Reserve "
+                "no_action in a DM for duplicate/system noise or when a reply clearly adds no value; when unsure, "
+                "ask rather than stay silent. A team-channel message (visibility=team), by contrast, may not target the bot or user "
                 "at all, so letting it pass with no_action is acceptable there, subject to slack_notification_policy "
                 "(mention-required / allowlist)."
             ),
             "direct_response_policy": (
-                "When a private-DM user asks what an existing item/status/approval/workflow prompt means, why it is "
-                "needed, what to do, or asks to explain/show/summarize it, answer through direct_responses without "
-                "changing proposal or approval state. Use action=respond when no mutation is requested. The same "
+                "Use direct_responses for useful private-DM conversation about tasks, planning, app behavior, draft "
+                "wording, existing item/status/approval/workflow meaning, reasons, guidance, explanation, display, or "
+                "summaries without changing proposal or approval state. Use action=respond when no mutation is requested. The same "
                 "decision may include direct_responses plus drafts/patches for mixed intent. Attach exact proposal_id/"
-                "request_id when known, use recipient_id=current sender, and set interaction_label=request for explicit "
-                "asks such as [요청]/설명해줘/알려줘/보여줘/왜. Never put [요청] in persisted task titles/types. "
+                "request_id when the answer concerns an existing item and use recipient_id=current sender. The [요청] "
+                "tag is optional: set interaction_label=request only when the literal tag is present; otherwise leave it "
+                "empty for a normal conversational reply. Never put [요청] in persisted task titles/types. "
                 "Do not turn an explanation into a needs_clarification patch and do not claim an external action ran."
             ),
             "date_fields": "Use ISO YYYY-MM-DD or empty string. Do not invent exact dates when a window is ambiguous.",

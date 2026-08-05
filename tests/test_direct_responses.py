@@ -134,6 +134,36 @@ def test_explanation_response_preserves_pending_state_and_marks_request(tmp_path
     assert "agent.direct_response.accepted" in [event["type"] for event in store.read_events()]
 
 
+def test_general_task_management_conversation_needs_no_tag_or_target(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    decision = OperatingAgentDecision(
+        action="respond",
+        source="semantic_test",
+        confidence=0.98,
+        rationale="The user is discussing how to organize work without requesting a mutation.",
+        direct_responses=(
+            DirectResponse(
+                recipient_id="me",
+                text="네. 먼저 현재 구조를 설명하고, 원하시면 그다음 메시지에서 실제 변경으로 이어갈 수 있습니다.",
+                response_type="answer",
+                interaction_label="",
+                evidence_text="그냥 대화 형식은 안되는건가",
+                confidence=0.98,
+            ),
+        ),
+    )
+
+    result = TeamTaskOrchestrator(store, operating_agent=StaticDecisionAgent(decision)).handle_message(
+        _message("그냥 대화 형식은 안되는건가")
+    )
+
+    assert result.proposals == ()
+    assert result.approval_requests == ()
+    assert result.outbound_messages[0].message_type == "agent_direct_response"
+    assert result.outbound_messages[0].text.startswith("네.")
+    assert "[요청]" not in result.outbound_messages[0].text
+
+
 def test_direct_response_survives_a_same_turn_feedback_patch(tmp_path: Path) -> None:
     store = _store(tmp_path)
     proposal, request = _pending_mail()
@@ -212,7 +242,8 @@ def test_shared_prompt_routes_explanations_to_direct_responses() -> None:
 
     assert "use direct_responses" in prompt
     assert "Do not encode an explanation as a proposal_patch" in prompt
-    assert "never copy [요청] into a task title" in prompt
+    assert "`[요청]` is optional" in prompt
+    assert "Never copy [요청] into a task title" in prompt
 
 
 def test_rule_fallback_explains_recent_pending_item_without_creating_work() -> None:

@@ -507,7 +507,7 @@ class RuleBasedTeamTaskOperatingAgent:
                     response_type="explanation",
                     proposal_id=proposal.proposal_id,
                     request_id=request.request_id if request else "",
-                    interaction_label="request",
+                    interaction_label="request" if "[요청]" in message.text else "",
                     evidence_text=message.text,
                     confidence=0.9,
                 ),

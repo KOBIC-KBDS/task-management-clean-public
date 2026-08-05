@@ -43,12 +43,15 @@ but must not be asked again.
 
 ## Explicit request marker
 
-`[요청]` is a message-level interaction hint. It must not be copied into a task
-title, item type, or persisted task metadata merely because the user wrote it.
+Private-DM task/planning/app conversation may receive a normal read-only answer
+without a command prefix or task mutation. `[요청]` is an optional message-level
+interaction hint. It must not be copied into a task title, item type, or persisted
+task metadata merely because the user wrote it.
 
 - Read-only asks such as explanation, status, reason, or “what should I do?” use
   an `agent_direct_response` message and leave proposal/approval state unchanged.
-- The rendered answer may begin with the small Slack marker `*[요청]*`.
+- The rendered answer begins with `*[요청]*` only when the literal tag was present;
+  untagged messages should look like ordinary conversation.
 - A message may ask for both an explanation and a real task change; render the
   answer and apply only the independently validated draft/patch.
 - If the target is ambiguous, ask which existing item the user means. Do not

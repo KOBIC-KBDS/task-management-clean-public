@@ -273,7 +273,7 @@ When refactoring this contract, update `docs/shared-context.md` with:
 
 ## Read-only request/answer path
 
-Explicit questions such as `[요청] 이 항목이 무슨 뜻인지 설명해줘` are interaction requests, not a new task type. The agent emits `action=respond` with one or more `direct_responses`; the core validates that each response goes back to the current private-DM sender, references accessible proposal/request IDs, and meets the confidence gate. The core then renders a small `*[요청]*` marker without changing proposal or approval state.
+Ordinary private-DM conversation about tasks, planning, app behavior, draft wording, or existing state may emit `action=respond` with one or more `direct_responses`. The core validates that each response goes back to the current private-DM sender, checks referenced proposal/request IDs when present, and applies the confidence gate without changing proposal or approval state. `[요청]` is optional and only adds the small `*[요청]*` marker when the literal tag is present; untagged messages render as normal conversation.
 
 A single decision may contain both `direct_responses` and a real draft/patch. This allows the bot to explain what it understood and apply an explicitly requested correction in the same turn. Explanation text must never be hidden inside a rejected `needs_clarification` patch. If a semantic CLI times out, the conservative rule fallback may explain an exactly matched recent item, but it will ask for the target rather than guess.
 

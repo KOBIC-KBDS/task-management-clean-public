@@ -1,7 +1,7 @@
 # Module Map: task-management-public-release
 
 - Target repo: `<repo-root>`
-- Generated at: `2026-08-05T01:17:03Z`
+- Generated at: `2026-08-05T01:38:35Z`
 - Evidence source: deterministic static scan by `repo_inventory.py`
 
 ## Module Dependency Diagram

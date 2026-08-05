@@ -21,11 +21,12 @@ Start with [`docs/agent-flow.md`](docs/agent-flow.md) to understand how the sema
 A rendered preview is available at [`docs/agent-flow.html`](docs/agent-flow.html), and the older standalone interactive runtime-flow demo remains at [`docs/agent-flow-demo/index.html`](docs/agent-flow-demo/index.html).
 For cross-agent refactoring handoffs, read and update [`docs/shared-context.md`](docs/shared-context.md) before and after meaningful changes.
 
-`[요청]` is an optional interaction hint for explicit asks. It is not a task type
-and is never persisted in a task title merely because the user wrote it. Questions
-about an existing item are answered without closing, approving, or otherwise
-changing that item; one message may still combine a read-only answer with a
-separately validated task update.
+Ordinary private-DM conversation about tasks, planning, app behavior, drafts,
+or existing state can be answered without creating or changing work. `[요청]`
+is only an optional visual hint for an explicitly tagged ask; untagged messages
+receive normal conversational replies. The tag is not a task type and is never
+persisted in a task title merely because the user wrote it. One message may still
+combine a read-only answer with a separately validated task update.
 
 ## Deployment model
 

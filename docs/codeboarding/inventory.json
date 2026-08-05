@@ -4164,7 +4164,7 @@
     {
       "language": "Markdown",
       "path": "README.md",
-      "size_bytes": 10526,
+      "size_bytes": 10639,
       "suffix": ".md"
     },
     {
@@ -4182,13 +4182,13 @@
     {
       "language": "HTML",
       "path": "docs/agent-flow.html",
-      "size_bytes": 26508,
+      "size_bytes": 28252,
       "suffix": ".html"
     },
     {
       "language": "Markdown",
       "path": "docs/agent-flow.md",
-      "size_bytes": 23264,
+      "size_bytes": 23340,
       "suffix": ".md"
     },
     {
@@ -4200,7 +4200,7 @@
     {
       "language": "Markdown",
       "path": "docs/shared-context.md",
-      "size_bytes": 8982,
+      "size_bytes": 9624,
       "suffix": ".md"
     },
     {
@@ -4362,7 +4362,7 @@
     {
       "language": "Markdown",
       "path": "ops/human-message-contract.md",
-      "size_bytes": 2468,
+      "size_bytes": 2673,
       "suffix": ".md"
     },
     {
@@ -4566,13 +4566,13 @@
     {
       "language": "Python",
       "path": "task_management/operating_agent.py",
-      "size_bytes": 51310,
+      "size_bytes": 51348,
       "suffix": ".py"
     },
     {
       "language": "Python",
       "path": "task_management/operating_agent_prompt.py",
-      "size_bytes": 13839,
+      "size_bytes": 14072,
       "suffix": ".py"
     },
     {
@@ -4632,7 +4632,7 @@
     {
       "language": "Python",
       "path": "task_management/semantic_context.py",
-      "size_bytes": 21531,
+      "size_bytes": 21831,
       "suffix": ".py"
     },
     {
@@ -4818,7 +4818,7 @@
     {
       "language": "Python",
       "path": "tests/test_direct_responses.py",
-      "size_bytes": 12050,
+      "size_bytes": 13351,
       "suffix": ".py"
     },
     {
@@ -4978,7 +4978,7 @@
       "suffix": ".py"
     }
   ],
-  "generated_at": "2026-08-05T01:17:03Z",
+  "generated_at": "2026-08-05T01:38:35Z",
   "important_configs": [
     ".codex/skills/slack-canvas-task-page/SKILL.md",
     "AGENTS.md",
